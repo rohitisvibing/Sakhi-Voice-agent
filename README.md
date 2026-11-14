@@ -93,9 +93,45 @@ Approvals distinguish information sharing, negotiation authority, financial comm
 
 Text and voice go through one `LiveSession`: microphone PCM, typed counterparty lines, your instructions, approvals and controls. It owns a single conversation ID, transcript, negotiation state, approval queue and state machine (`idle → … → completed`). Text and voice never get separate contexts.
 
+### Sign-in and per-user data
+
+Sign-in is Google through **Supabase Auth**, and it's on whenever `SUPABASE_URL` is set.
+
+- **Identity.** The browser signs in with supabase-js (PKCE) and sends the access token as `Authorization: Bearer …`. The backend checks it against the project's signing keys (JWKS), or `SUPABASE_JWT_SECRET` on legacy HS256 projects. The token's `sub`, the `auth.users` id, is the principal id.
+- **First sign-in.** It creates the profile, with name and email filled in from Google.
+- **Ownership.** Every mission, conversation, report, approval and socket is checked against the caller's principal. Anything else answers "not found".
+- **WebSocket.** The token comes in the first frame, `{"type":"auth","token"}`. Without it the socket closes with 4401; someone else's conversation closes it with 4404.
+- **Daily caps.** Each user gets `MAX_MISSIONS_PER_DAY` (30) and `MAX_CONVERSATIONS_PER_DAY` (20), because anyone with a Google account can sign in and these spend LLM and speech credits.
+- **No Supabase (demo, tests) or `AUTH_DISABLED=true`.** Everyone is one default principal.
+- **Data from before sign-in existed.** Move it to an account with `uv run python scripts/claim_data.py you@example.com [--profile]`.
+
+Setup:
+
+1. Enable the Google provider in Supabase (Authentication → Providers).
+2. Add the app's URLs, for example `http://localhost:3000/**`, under Authentication → URL Configuration → Redirect URLs.
+3. Give the frontend `NEXT_PUBLIC_SUPABASE_URL` and the publishable key `NEXT_PUBLIC_SUPABASE_ANON_KEY`. That key is public by design: RLS is on for every table with no policies, so only the backend's service role can reach the data.
+
+### Billing (Razorpay subscription)
+
+Billing is on when `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_PLAN_ID` are set. Without them, everything is free.
+
+- **Trial.** Your first mission is free, with all its calls, up to a hidden 3 minutes of talk time in total (`TRIAL_TALK_MINUTES`). When the trial runs out mid-call, the agent says goodbye and the payment sheet opens.
+- **Paywall.** Your second mission, or a call on a mission that isn't the trial, gets `402 payment_required`. The app then opens the payment sheet. Once you've paid, the request you were making simply goes through.
+- **The plan.** `PLAN_PRICE_INR` (₹499) a month, through Razorpay Subscriptions and Checkout. Talk time is metered only while a call is live: not when paused, and not while it waits for your approval. The meter is capped at `MONTHLY_TALK_MINUTES` (180) per billing period. **Limits are never sent to the UI.**
+- **Running out mid-call.** The agent says a short goodbye and ends the call. The next call says when the plan renews.
+- **Activation.** `/api/billing/verify` checks Checkout's signature, so access starts at once.
+- **Webhook.** `/api/billing/webhook` checks its own signature and keeps renewals, halts and cancellations in sync. Register `https://<your-domain>/api/billing/webhook` for `subscription.*` events.
+- **Cancelling.** It takes effect at the end of the period.
+- **Setup:**
+  1. Run `supabase/migrations/20261115000000_billing.sql`.
+  2. Set the Razorpay keys.
+  3. Run `uv run python scripts/create_plan.py` once per key set and put the printed id in `RAZORPAY_PLAN_ID`.
+- **Going live.** Razorpay needs public terms, privacy, refund and contact pages. `/legal` has them. Fill in the bracketed details.
+
 ### WebSocket protocol (`/ws/conversations/{id}`)
 
 - **Client → server:**
+  - With sign-in on, the first frame is `{"type":"auth","token"}`.
   - Binary PCM16 at 16 kHz mono (live mic).
   - JSON control messages: `start`, `pause`, `resume`, `interrupt`, `end`, `mute`, `unmute`, `takeover`, `release`.
   - `intervene{text, urgent?}`: a nudge to the agent (see below).
@@ -151,7 +187,7 @@ Agent and simulated lines carry an English translation from the same model call.
 ## Tests
 
 ```bash
-cd backend && uv run pytest          # 110 tests
+cd backend && uv run pytest          # 130 tests
 cd frontend && pnpm lint && pnpm exec tsc --noEmit && pnpm build
 ```
 
@@ -166,10 +202,12 @@ Backend tests cover:
 - Approval, reject and alternative flows, one-turn disclosure, takeover.
 - Provider failures: missing key, 429, 5xx, invalid JSON, TTS fallback, quota.
 - A full HTTP + WebSocket end-to-end run in demo mode.
+- Billing: the free trial mission, the paywall, Checkout and webhook signatures, renewals and cancellation, metering only live time, and a polite hang-up when talk time runs out.
+- Sign-in: bad, expired and foreign tokens; per-user isolation across every route and the socket; profile field ids; daily caps.
 
 ## Configuration
 
-See `.env.example`. Every secret stays server-side. The frontend only knows `NEXT_PUBLIC_API_URL`.
+See `.env.example`. Every secret stays server-side. The frontend only knows `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL` and the publishable `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 
 | Variable | Purpose |
 | --- | --- |
@@ -181,7 +219,11 @@ See `.env.example`. Every secret stays server-side. The frontend only knows `NEX
 | `SARVAM_TTS_MODEL`, `SARVAM_TTS_AGENT_SPEAKER`, `SARVAM_TTS_COUNTERPARTY_SPEAKER` | Voices (speaker names must match the model) |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Persistence (RLS enabled; backend uses service role) |
 | `DEMO_MODE` | Force the demo LLM |
+| `AUTH_DISABLED`, `SUPABASE_JWT_SECRET` | Turn sign-in off; HS256 secret for legacy projects (optional) |
+| `MAX_MISSIONS_PER_DAY`, `MAX_CONVERSATIONS_PER_DAY` | Per-user daily caps (0 = none) |
+| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_PLAN_ID`, `RAZORPAY_WEBHOOK_SECRET` | Billing (off when unset) |
+| `PLAN_PRICE_INR`, `MONTHLY_TALK_MINUTES`, `TRIAL_TALK_MINUTES` | ₹499 / 180 min / 3 min by default; minutes are never shown |
 
 ## Out of scope (by design, for now)
 
-PSTN / outbound / inbound calling, WhatsApp, native apps, multi-user auth, billing. Telephony plugs in as a new `CounterpartyChannel` that feeds the same STT/TTS pipeline. The objective engine doesn't change.
+PSTN / outbound / inbound calling, WhatsApp, native apps. Telephony plugs in as a new `CounterpartyChannel` that feeds the same STT/TTS pipeline. The objective engine doesn't change.

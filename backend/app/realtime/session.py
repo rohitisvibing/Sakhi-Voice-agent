@@ -33,7 +33,7 @@ from app.models.transcript import EventKind, Speaker, TranscriptEvent
 from app.providers.languages import to_code, to_name
 from app.providers.stt.base import STTStream
 from app.providers.tts.base import Voice
-from app.services import approval_manager, outcome_analyzer, simulator
+from app.services import approval_manager, billing, outcome_analyzer, simulator
 from app.services.conversation_manager import (
     TurnInputs,
     merge_delta,
@@ -61,6 +61,23 @@ PAUSE_RE = re.compile(
     r"^\s*(pause|stop|hold on|wait)(\s+(please|now|a (sec|second|moment|minute)|"
     r"for a (sec|second|moment|minute)))?\s*[.!]*\s*$", re.IGNORECASE)
 MAX_INSTRUCTIONS = 8
+# Talk time is metered only while the call is live (not paused, not awaiting you).
+_METERED = {ConversationState.connecting, ConversationState.listening,
+            ConversationState.thinking, ConversationState.speaking,
+            ConversationState.interrupted}
+_METER_TICK_S = 5.0
+# Out of talk time: let the goodbye land, then hang up regardless. Short allowances (the trial)
+# get a proportionally short grace, so it never becomes free extra minutes.
+_OVERRUN_GRACE_S = 45.0
+_OVERRUN_GRACE_MIN_S = 15.0
+_OVERRUN_GRACE_SHARE = 0.15
+
+
+def overrun_grace(allowance: float) -> float:
+    return max(_OVERRUN_GRACE_MIN_S, min(_OVERRUN_GRACE_S, allowance * _OVERRUN_GRACE_SHARE))
+WRAP_UP_DIRECTIVE = (
+    "Talk time is up. Close the call now, politely and briefly: say you need to stop here "
+    "and that the principal will follow up. Make no new offers. Set end_conversation=true.")
 _SAYS_AI = re.compile(r"\b(ai|a\.i\.|artificial intelligence)\b|ಎಐ|एआई|ஏஐ|ఏఐ", re.IGNORECASE)
 
 
@@ -108,6 +125,15 @@ class LiveSession:
         self._persist_lock = asyncio.Lock()
         self._bg: set[asyncio.Task] = set()
         self.voice_enabled = conv.voice_enabled and c.voice_available
+        # Billing: seconds this call may still use (None = unmetered), set by refresh_allowance.
+        self.allowance: float | None = None
+        self._talk = float(conv.talk_seconds)
+        self._talk_base = self._talk
+        self._live_since: float | None = None
+        self._meter_task: asyncio.Task | None = None
+        self.out_of_time = False
+        self._wrapping = False  # the goodbye line is being said
+        self._grace = _OVERRUN_GRACE_S
         self.pace_text = c.settings.text_pacing  # in text-only mode, pause roughly as long as reading takes
         # Negotiation notes are updated off the critical path, while a line is being spoken.
         self._state_task: asyncio.Task | None = None
@@ -155,11 +181,63 @@ class LiveSession:
             except Exception as e:  # noqa: BLE001
                 log.warning("persist conversation failed: %s", e)
 
+    # ---- talk-time meter --------------------------------------------------------------
+    def talk_used(self) -> float:
+        live = time.monotonic() - self._live_since if self._live_since is not None else 0.0
+        return self._talk + live
+
+    def _meter(self, new: ConversationState) -> None:
+        now = time.monotonic()
+        if self._live_since is not None and new not in _METERED:
+            self._talk += now - self._live_since
+            self._live_since = None
+        elif self._live_since is None and new in _METERED:
+            self._live_since = now
+            if self.allowance is not None and (self._meter_task is None
+                                               or self._meter_task.done()):
+                self._meter_task = asyncio.create_task(self._watch_meter())
+        self.conv.talk_seconds = int(self.talk_used())
+
+    def time_left(self) -> float | None:
+        if self.allowance is None:
+            return None
+        return self.allowance - (self.talk_used() - self._talk_base)
+
+    async def refresh_allowance(self) -> None:
+        """Re-read what this call may use (after subscribing, or a new period)."""
+        self.conv.talk_seconds = int(self.talk_used())
+        await self._persist()
+        self.allowance = await billing.remaining_seconds(self.c, self.mission)
+        self._grace = overrun_grace(self.allowance or 0.0)
+        self._talk_base = self.talk_used()
+        self.out_of_time = self.allowance is not None and self.allowance <= 0
+
+    async def _watch_meter(self) -> None:
+        ticks = 0
+        while self._live_since is not None and self.state not in (S.completed, S.failed):
+            await asyncio.sleep(_METER_TICK_S)
+            ticks += 1
+            self.conv.talk_seconds = int(self.talk_used())
+            if ticks % 6 == 0:
+                self._bg_task(self._persist())
+            left = self.time_left()
+            if left is None or left > 0:
+                continue
+            if not self.out_of_time:
+                self.out_of_time = True
+                log.info("talk time used up in %s", self.conv.id)
+                if self.state == S.listening and self.task_kind != "agent":
+                    self.schedule(self.run_agent_turn(directive=WRAP_UP_DIRECTIVE), kind="agent")
+            elif left < -self._grace:
+                await self.end_out_of_time()
+                return
+
     async def set_state(self, new: ConversationState) -> None:
         if new == self.state:
             return
         if not can_transition(self.state, new):
             log.warning("unexpected transition %s -> %s", self.state, new)
+        self._meter(new)
         self.state = new
         await self.emit(self.state_msg())
         self._bg_task(self._persist())
@@ -373,8 +451,28 @@ class LiveSession:
             ev.set()
 
     # ---- lifecycle -----------------------------------------------------------------------
+    async def end_out_of_time(self) -> None:
+        """Hang up because talk time ran out. On the free trial, ask them to subscribe now."""
+        await self.finish("Talk time used up.")
+        if billing.enabled(self.c) and not await billing.active_subscription(
+                self.c, self.mission.principal_id):
+            await self.error(billing.needs_subscription())
+
+    async def _has_time(self) -> bool:
+        """Before (re)starting a metered call: is there talk time left?"""
+        await self.refresh_allowance()
+        if not self.out_of_time:
+            return True
+        try:
+            await billing.check_can_start_call(self.c, self.mission)
+        except AppError as e:
+            await self.error(e)
+        return False
+
     async def start(self) -> None:
         if self.state in (S.completed,):
+            return
+        if not await self._has_time():
             return
         if self.events:  # already started: treat as resume
             await self.resume()
@@ -577,6 +675,9 @@ class LiveSession:
 
     async def run_agent_turn(self, directive: str | None = None, is_opening: bool = False,
                              allow_hold: bool = False) -> None:
+        if self.out_of_time and not is_opening:
+            directive, allow_hold = WRAP_UP_DIRECTIVE, False
+            self._wrapping = True
         self.respond_after_speech = None
         self._turn_args = (directive, allow_hold)
         plain = directive is None and not is_opening and not allow_hold
@@ -653,7 +754,16 @@ class LiveSession:
             await self.emit({"type": "transcript.update", "id": spoken.id, "meta": spoken.meta})
             await self._nudge_status(nudges, "applied", applied_in=spoken.id)
         if plan.end_conversation:
-            await self.finish("The agent closed the conversation.")
+            if self.out_of_time:
+                await self.end_out_of_time()
+            else:
+                await self.finish("The agent closed the conversation.")
+            return
+        if self.out_of_time:
+            if self._wrapping:
+                await self.end_out_of_time()
+            else:  # ran out during an ordinary line: say goodbye, then hang up
+                await self.run_agent_turn()
             return
         if self._counterparty_left():
             await self.finish("The counterparty ended the conversation.")
@@ -794,6 +904,8 @@ class LiveSession:
 
     async def resume(self) -> None:
         if self.state in (S.completed, S.failed):
+            return
+        if self.allowance is not None and not await self._has_time():
             return
         was_paused = self.paused
         self.paused = False

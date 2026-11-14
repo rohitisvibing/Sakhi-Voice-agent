@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 
-from app.api.profiles import load_profile
+from app.api.ownership import owned_mission
+from app.api.profiles import Principal, load_profile
+from app.core.auth import check_daily_limit
 from app.core.deps import get_container
 from app.core.errors import AppError, ErrorKind
 from app.models.common import Schema, utcnow
@@ -14,7 +16,7 @@ from app.models.mission import (
     MissionStatus,
     RefineRequest,
 )
-from app.services import objective_engine, strategy_engine
+from app.services import billing, objective_engine, strategy_engine
 
 router = APIRouter(prefix="/api", tags=["missions"])
 
@@ -39,11 +41,8 @@ class MissionSummary(Schema):
     objective_met: bool | None = None
 
 
-async def _get(mission_id: str) -> Mission:
-    m = await get_container().repo.get_mission(mission_id)
-    if not m:
-        raise AppError(ErrorKind.not_found, "Mission not found.")
-    return m
+async def _get(mission_id: str, pid: str) -> Mission:
+    return await owned_mission(get_container(), mission_id, pid)
 
 
 @router.get("/templates", response_model=list[AgentTemplate])
@@ -52,9 +51,9 @@ async def templates() -> list[AgentTemplate]:
 
 
 @router.get("/missions", response_model=list[MissionSummary])
-async def list_missions() -> list[MissionSummary]:
+async def list_missions(pid: Principal) -> list[MissionSummary]:
     c = get_container()
-    missions = await c.repo.list_missions(c.settings.default_principal_id)
+    missions = await c.repo.list_missions(pid)
     convs = await c.repo.list_conversations([m.id for m in missions])
     latest: dict = {}
     for conv in sorted(convs, key=lambda x: x.updated_at):
@@ -73,25 +72,30 @@ async def list_missions() -> list[MissionSummary]:
 
 
 @router.post("/missions/extract", response_model=Mission)
-async def extract(body: ExtractRequest) -> Mission:
+async def extract(body: ExtractRequest, pid: Principal) -> Mission:
     c = get_container()
-    profile = await load_profile()
+    await check_daily_limit(c, pid, "missions")
+    is_trial = await billing.can_create_mission(c, pid)
+    profile = await load_profile(pid)
     result = await objective_engine.extract(c.llm, body, profile)
     mission = Mission(principal_id=profile.id, raw_input=body.text, spec=result.spec,
                       extraction=result, agent_type=_agent_type(body.text),
                       template_id=body.template_id)
-    return await c.repo.save_mission(mission)
+    saved = await c.repo.save_mission(mission)
+    if is_trial:
+        await c.repo.set_trial_mission(pid, saved.id)
+    return saved
 
 
 @router.get("/missions/{mission_id}", response_model=Mission)
-async def get_mission(mission_id: str) -> Mission:
-    return await _get(mission_id)
+async def get_mission(mission_id: str, pid: Principal) -> Mission:
+    return await _get(mission_id, pid)
 
 
 @router.post("/missions/{mission_id}/refine", response_model=Mission)
-async def refine(mission_id: str, body: RefineRequest) -> Mission:
+async def refine(mission_id: str, body: RefineRequest, pid: Principal) -> Mission:
     c = get_container()
-    m = await _get(mission_id)
+    m = await _get(mission_id, pid)
     answers = {q: a for q, a in body.answers.items() if a.strip()}
     if not answers:
         return m
@@ -103,8 +107,8 @@ async def refine(mission_id: str, body: RefineRequest) -> Mission:
 
 
 @router.put("/missions/{mission_id}/spec", response_model=Mission)
-async def update_spec(mission_id: str, spec: MissionSpec) -> Mission:
-    m = await _get(mission_id)
+async def update_spec(mission_id: str, spec: MissionSpec, pid: Principal) -> Mission:
+    m = await _get(mission_id, pid)
     if m.status not in (MissionStatus.draft, MissionStatus.approved, MissionStatus.prepared):
         raise AppError(ErrorKind.invalid_state, "This mission is already running.")
     m.spec = objective_engine._post_validate(
@@ -115,8 +119,8 @@ async def update_spec(mission_id: str, spec: MissionSpec) -> Mission:
 
 
 @router.post("/missions/{mission_id}/approve", response_model=Mission)
-async def approve(mission_id: str) -> Mission:
-    m = await _get(mission_id)
+async def approve(mission_id: str, pid: Principal) -> Mission:
+    m = await _get(mission_id, pid)
     if m.status == MissionStatus.draft:
         m.status, m.updated_at = MissionStatus.approved, utcnow()
         await get_container().repo.save_mission(m)
@@ -124,12 +128,12 @@ async def approve(mission_id: str) -> Mission:
 
 
 @router.post("/missions/{mission_id}/prepare", response_model=Mission)
-async def prepare(mission_id: str) -> Mission:
+async def prepare(mission_id: str, pid: Principal) -> Mission:
     c = get_container()
-    m = await _get(mission_id)
+    m = await _get(mission_id, pid)
     if m.status == MissionStatus.draft:
         raise AppError(ErrorKind.invalid_state, "Approve the mission before preparing the agent.")
-    profile = await load_profile()
+    profile = await load_profile(pid)
     m.brief = await strategy_engine.prepare(c.llm, m.spec, profile)
     if m.status == MissionStatus.approved:
         m.status = MissionStatus.prepared
@@ -138,5 +142,6 @@ async def prepare(mission_id: str) -> Mission:
 
 
 @router.delete("/missions/{mission_id}", status_code=204)
-async def delete(mission_id: str) -> None:
+async def delete(mission_id: str, pid: Principal) -> None:
+    await _get(mission_id, pid)
     await get_container().repo.delete_mission(mission_id)

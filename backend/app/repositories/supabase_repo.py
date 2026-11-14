@@ -3,6 +3,8 @@
 from supabase import AsyncClient, acreate_client
 
 from app.core.config import Settings
+from app.models.billing import Subscription
+from app.models.common import utcnow
 from app.models.conversation import Approval, Conversation
 from app.models.mission import AgentTemplate, Mission
 from app.models.principal import PrincipalProfile, ProfileField
@@ -98,6 +100,18 @@ class SupabaseRepository(Repository):
     async def delete_mission(self, mission_id):
         await (await self._t("missions")).delete().eq("id", mission_id).execute()
 
+    async def count_created_today(self, principal_id, kind):
+        day = utcnow().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        if kind == "missions":
+            q = (await self._t("missions")).select("id", count="exact", head=True) \
+                .eq("principal_id", principal_id)
+        else:
+            q = (await self._t("conversations")) \
+                .select("id, missions!inner(principal_id)", count="exact", head=True) \
+                .eq("missions.principal_id", principal_id)
+        res = await q.gte("created_at", day).execute()
+        return res.count or 0
+
     # conversations -------------------------------------------------------------------
     async def save_conversation(self, conv):
         await (await self._t("conversations")).upsert(_j(conv)).execute()
@@ -147,3 +161,37 @@ class SupabaseRepository(Repository):
         res = await (await self._t("outcome_reports")).select("report") \
             .eq("conversation_id", conversation_id).limit(1).execute()
         return OutcomeReport.model_validate(res.data[0]["report"]) if res.data else None
+
+    # billing -------------------------------------------------------------------------
+    async def get_trial_mission(self, principal_id):
+        res = await (await self._t("principals")).select("trial_mission_id") \
+            .eq("id", principal_id).limit(1).execute()
+        return res.data[0].get("trial_mission_id") if res.data else None
+
+    async def set_trial_mission(self, principal_id, mission_id):
+        await (await self._t("principals")).update({"trial_mission_id": mission_id}) \
+            .eq("id", principal_id).execute()
+
+    async def get_subscription(self, principal_id):
+        res = await (await self._t("subscriptions")).select("*") \
+            .eq("principal_id", principal_id).limit(1).execute()
+        return Subscription.model_validate(res.data[0]) if res.data else None
+
+    async def find_subscription(self, razorpay_subscription_id):
+        res = await (await self._t("subscriptions")).select("*") \
+            .eq("razorpay_subscription_id", razorpay_subscription_id).limit(1).execute()
+        return Subscription.model_validate(res.data[0]) if res.data else None
+
+    async def save_subscription(self, sub):
+        await (await self._t("subscriptions")).upsert(_j(sub)).execute()
+
+    async def talk_seconds(self, principal_id, *, since=None, mission_id=None):
+        q = (await self._t("conversations")) \
+            .select("talk_seconds, missions!inner(principal_id)") \
+            .eq("missions.principal_id", principal_id)
+        if since is not None:
+            q = q.gte("created_at", since.isoformat())
+        if mission_id is not None:
+            q = q.eq("mission_id", mission_id)
+        res = await q.execute()
+        return sum(int(r.get("talk_seconds") or 0) for r in res.data)

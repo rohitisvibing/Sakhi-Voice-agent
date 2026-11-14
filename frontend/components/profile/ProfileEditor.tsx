@@ -10,6 +10,9 @@ import { DISCLOSURE_LABEL } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { ErrorNote } from "@/components/shell/ErrorNote";
+import { signOut, useMe } from "@/components/shell/AuthGate";
+import { openPaywall } from "@/lib/paywall";
+import { useBilling } from "@/hooks/useBilling";
 import { cn } from "@/lib/utils";
 
 const POLICIES: { p: Disclosure; icon: LucideIcon; on: string }[] = [
@@ -193,6 +196,79 @@ export function ProfileEditor() {
           </Button>
         )}
       </div>
+      <PlanRow />
+      <SignedInAs />
     </div>
+  );
+}
+
+function day(iso: string | null) {
+  return iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
+}
+
+/** The plan, in one quiet line. Dates only: talk time is never shown. */
+function PlanRow() {
+  const qc = useQueryClient();
+  const { billing: b, subscribed: paid } = useBilling();
+  const cancel = useMutation({
+    mutationFn: api.cancelSubscription,
+    onSuccess: (b) => {
+      qc.setQueryData(["billing"], b);
+      toast("Cancelled. Envoy keeps working until " + day(b.renews_on) + ".");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  if (!b?.enabled) return null;
+  return (
+    <div className="mt-16 flex items-center justify-between gap-4 border-t border-line pt-5 text-meta">
+      <span className="min-w-0 truncate text-ink-2">
+        {paid ? (
+          <>
+            Envoy <span className="text-ink-3">· {b.cancel_at_period_end ? "ends" : "renews"} {day(b.renews_on)}</span>
+          </>
+        ) : (
+          "Free trial"
+        )}
+      </span>
+      {paid ? (
+        !b.cancel_at_period_end && (
+          <button
+            type="button"
+            disabled={cancel.isPending}
+            onClick={() => {
+              if (window.confirm("Cancel your plan? Envoy keeps working until " + day(b.renews_on) + ".")) cancel.mutate();
+            }}
+            className="shrink-0 rounded-full px-3 py-1.5 text-ink-3 transition-colors hover:bg-elevated hover:text-ink"
+          >
+            Cancel plan
+          </button>
+        )
+      ) : (
+        <button
+          type="button"
+          onClick={() => void openPaywall()}
+          className="shrink-0 rounded-full px-3 py-1.5 text-aurora transition-colors hover:bg-aurora-soft"
+        >
+          Subscribe
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SignedInAs() {
+  const me = useMe();
+  if (!me) return null;
+  return (
+    <footer className="mt-6 flex items-center justify-between gap-4 border-t border-line pt-5 text-meta text-ink-3">
+      <span className="min-w-0 truncate">{me.email ?? me.name}</span>
+      <button
+        type="button"
+        onClick={() => void signOut()}
+        className="shrink-0 rounded-full px-3 py-1.5 text-ink-2 transition-colors hover:bg-elevated hover:text-ink"
+      >
+        Sign out
+      </button>
+    </footer>
   );
 }

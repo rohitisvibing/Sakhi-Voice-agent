@@ -14,6 +14,8 @@ class ErrorKind(StrEnum):
     speech_failed = "speech_failed"
     not_found = "not_found"
     invalid_state = "invalid_state"
+    unauthorized = "unauthorized"
+    payment_required = "payment_required"
 
 
 HTTP_STATUS = {
@@ -27,6 +29,8 @@ HTTP_STATUS = {
     ErrorKind.speech_failed: 502,
     ErrorKind.not_found: 404,
     ErrorKind.invalid_state: 409,
+    ErrorKind.unauthorized: 401,
+    ErrorKind.payment_required: 402,
 }
 
 
@@ -39,8 +43,10 @@ class AppError(Exception):
         provider: str | None = None,
         retryable: bool = False,
         retry_after: float | None = None,
+        detail: dict | None = None,
     ) -> None:
         super().__init__(message)
+        self.detail = detail or {}
         self.kind = kind
         self.message = message
         self.provider = provider
@@ -58,7 +64,7 @@ class AppError(Exception):
             "provider": self.provider,
             "retryable": self.retryable,
             "retry_after": self.retry_after,
-        }
+        } | self.detail
 
 
 class ProviderError(AppError):

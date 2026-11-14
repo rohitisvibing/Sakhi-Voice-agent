@@ -230,6 +230,18 @@ export interface OutcomeReport {
   created_at: string;
 }
 
+export interface AuthUser {
+  id: string;
+  email: string | null;
+  name: string | null;
+  avatar_url: string | null;
+}
+
+export interface AuthSession {
+  required: boolean;
+  user: AuthUser | null;
+}
+
 export interface Health {
   ok: boolean;
   demo_mode: boolean;
@@ -245,4 +257,16 @@ export interface AppErrorPayload {
   retryable?: boolean;
   retry_after?: number | null;
   fatal?: boolean;
+  /** payment_required: "subscribe" (no plan) or "allowance" (this period's talk time is used). */
+  reason?: "subscribe" | "allowance";
+  renews_on?: string | null;
+}
+
+export interface Billing {
+  enabled: boolean;
+  status: "free" | "trial" | "trial_used" | "active" | "exhausted";
+  price_inr: number;
+  key_id: string | null;
+  renews_on: string | null;
+  cancel_at_period_end: boolean;
 }

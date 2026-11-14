@@ -6,7 +6,9 @@
  */
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import { wsUrl } from "@/services/api";
+import { signedOut, wsUrl } from "@/services/api";
+import { accessToken } from "@/lib/supabase";
+import { openPaywall } from "@/lib/paywall";
 import type {
   AppErrorPayload,
   Approval,
@@ -199,13 +201,16 @@ export function useConversation(conversationId: string, handlers: AudioHandlers)
     let ping: ReturnType<typeof setInterval> | undefined;
     const seen = new Map<string, Set<number>>(); // audio chunks already queued, per turn
 
-    const connect = () => {
+    const connect = async () => {
+      if (disposed) return;
+      const token = await accessToken(); // fresh on every (re)connect
       if (disposed) return;
       const ws = new WebSocket(wsUrl(`/ws/conversations/${conversationId}`));
       wsRef.current = ws;
       const current = () => !disposed && wsRef.current === ws;
       ws.onopen = () => {
         if (!current()) return ws.close();
+        ws.send(JSON.stringify({ type: "auth", token })); // must be the first frame
         retryRef.current = 0;
         dispatch({ type: "socket", status: "open" });
         ping = setInterval(() => ws.readyState === 1 && ws.send(JSON.stringify({ type: "ping" })), 20000);
@@ -229,6 +234,11 @@ export function useConversation(conversationId: string, handlers: AudioHandlers)
         if (msg.type === "audio.end") return h.onAudioEnd?.(msg.turn_id as string);
         if (msg.type === "audio.stop") return h.onAudioStop?.(msg.turn_id as string);
         if (msg.type === "pong") return;
+        const err = msg.type === "error" ? (msg.error as AppErrorPayload) : null;
+        if (err?.kind === "payment_required" && err.reason === "subscribe") {
+          void openPaywall(); // after paying, Start works again
+          return;
+        }
         const now = performance.now();
         if (msg.type === "transcript.final") timingRef.current.arrived.set((msg.event as TranscriptEvent).id, now);
         if (msg.type === "transcript.update" && (msg.meta as Record<string, unknown>)?.interrupted)
@@ -238,16 +248,17 @@ export function useConversation(conversationId: string, handlers: AudioHandlers)
       ws.onclose = (e) => {
         clearInterval(ping);
         if (!current()) return; // an old socket: its replacement is already running
-        if (closedByUs.current || e.code === 4404) {
+        if (closedByUs.current || e.code === 4404 || e.code === 4401) {
           dispatch({ type: "socket", status: "closed" });
+          if (e.code === 4401) signedOut();
           return;
         }
         dispatch({ type: "socket", status: "reconnecting" });
         const delay = Math.min(8000, 500 * 2 ** retryRef.current++);
-        timer = setTimeout(connect, delay);
+        timer = setTimeout(() => void connect(), delay);
       };
     };
-    connect();
+    void connect();
     return () => {
       disposed = true;
       closedByUs.current = true;

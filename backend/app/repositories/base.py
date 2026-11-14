@@ -1,7 +1,9 @@
 """Persistence interface. Services depend on this, not on Supabase directly."""
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
+from app.models.billing import Subscription
 from app.models.conversation import Approval, Conversation
 from app.models.mission import AgentTemplate, Mission
 from app.models.principal import PrincipalProfile
@@ -28,6 +30,10 @@ class Repository(ABC):
     async def list_missions(self, principal_id: str) -> list[Mission]: ...
     @abstractmethod
     async def delete_mission(self, mission_id: str) -> None: ...
+    @abstractmethod
+    async def count_created_today(self, principal_id: str, kind: str) -> int:
+        """Missions ("missions") or conversations ("conversations") this principal created
+        since midnight UTC."""
 
     @abstractmethod
     async def save_conversation(self, conv: Conversation) -> Conversation: ...
@@ -52,3 +58,20 @@ class Repository(ABC):
     async def save_report(self, report: OutcomeReport) -> None: ...
     @abstractmethod
     async def get_report(self, conversation_id: str) -> OutcomeReport | None: ...
+
+    # billing -------------------------------------------------------------------------
+    @abstractmethod
+    async def get_trial_mission(self, principal_id: str) -> str | None: ...
+    @abstractmethod
+    async def set_trial_mission(self, principal_id: str, mission_id: str) -> None: ...
+    @abstractmethod
+    async def get_subscription(self, principal_id: str) -> Subscription | None: ...
+    @abstractmethod
+    async def find_subscription(self, razorpay_subscription_id: str) -> Subscription | None: ...
+    @abstractmethod
+    async def save_subscription(self, sub: Subscription) -> None: ...
+    @abstractmethod
+    async def talk_seconds(self, principal_id: str, *, since: datetime | None = None,
+                           mission_id: str | None = None) -> int:
+        """Talk time across the principal's conversations created since `since`, or on one
+        mission."""

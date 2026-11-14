@@ -1,5 +1,8 @@
 from fastapi import APIRouter
 
+from app.api.ownership import owned_conversation, owned_mission
+from app.api.profiles import Principal
+from app.core.auth import check_daily_limit
 from app.core.deps import get_container
 from app.core.errors import AppError, ErrorKind
 from app.models.common import Schema
@@ -8,6 +11,7 @@ from app.models.mission import Mission, MissionStatus
 from app.models.report import OutcomeReport
 from app.models.transcript import TranscriptEvent
 from app.realtime.session_manager import manager
+from app.services import billing
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -20,28 +24,24 @@ class ConversationDetail(Schema):
 
 
 @router.post("", response_model=Conversation)
-async def create(body: CreateConversation) -> Conversation:
+async def create(body: CreateConversation, pid: Principal) -> Conversation:
     c = get_container()
-    m = await c.repo.get_mission(body.mission_id)
-    if not m:
-        raise AppError(ErrorKind.not_found, "Mission not found.")
+    m = await owned_mission(c, body.mission_id, pid)
     if m.status not in (MissionStatus.prepared, MissionStatus.active, MissionStatus.completed):
         raise AppError(ErrorKind.invalid_state, "Prepare the agent before starting.")
+    await check_daily_limit(c, pid, "conversations")
+    await billing.check_can_start_call(c, m)
     conv = Conversation(mission_id=m.id, mode=body.mode, state=ConversationState.ready,
                         voice_enabled=body.voice_enabled and c.voice_available)
     return await c.repo.save_conversation(conv)
 
 
 @router.get("/{conversation_id}", response_model=ConversationDetail)
-async def detail(conversation_id: str) -> ConversationDetail:
+async def detail(conversation_id: str, pid: Principal) -> ConversationDetail:
     c = get_container()
     live = manager.peek(conversation_id)
-    conv = live.conv if live else await c.repo.get_conversation(conversation_id)
-    if not conv:
-        raise AppError(ErrorKind.not_found, "Conversation not found.")
-    mission = await c.repo.get_mission(conv.mission_id)
-    if not mission:
-        raise AppError(ErrorKind.not_found, "Mission not found.")
+    conv, mission = await owned_conversation(c, conversation_id, pid,
+                                             live.conv if live else None)
     events = live.events if live else await c.repo.list_events(conversation_id)
     approvals = list(live.approvals.values()) if live else await c.repo.list_approvals(
         conversation_id)
@@ -50,8 +50,9 @@ async def detail(conversation_id: str) -> ConversationDetail:
 
 
 @router.get("/{conversation_id}/report", response_model=OutcomeReport)
-async def report(conversation_id: str) -> OutcomeReport:
+async def report(conversation_id: str, pid: Principal) -> OutcomeReport:
     c = get_container()
+    await owned_conversation(c, conversation_id, pid)
     r = await c.repo.get_report(conversation_id)
     if r:
         return r

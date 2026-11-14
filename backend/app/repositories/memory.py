@@ -1,5 +1,7 @@
 """In-memory repository for tests and zero-setup runs."""
 
+from app.models.billing import Subscription
+from app.models.common import utcnow
 from app.models.conversation import Approval, Conversation
 from app.models.mission import AgentTemplate, Mission
 from app.models.principal import PrincipalProfile
@@ -23,6 +25,8 @@ class MemoryRepository(Repository):
         self.approvals: dict[str, dict[str, Approval]] = {}
         self.reports: dict[str, OutcomeReport] = {}
         self.templates = list(DEFAULT_TEMPLATES)
+        self.trials: dict[str, str] = {}
+        self.subscriptions: dict[str, Subscription] = {}
 
     async def get_profile(self, principal_id):
         p = self.profiles.get(principal_id)
@@ -49,6 +53,14 @@ class MemoryRepository(Repository):
 
     async def delete_mission(self, mission_id):
         self.missions.pop(mission_id, None)
+
+    async def count_created_today(self, principal_id, kind):
+        day = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        mine = {m.id for m in self.missions.values() if m.principal_id == principal_id}
+        if kind == "missions":
+            return sum(1 for m in self.missions.values() if m.id in mine and m.created_at >= day)
+        return sum(1 for c in self.conversations.values()
+                   if c.mission_id in mine and c.created_at >= day)
 
     async def save_conversation(self, conv):
         self.conversations[conv.id] = conv.model_copy(deep=True)
@@ -86,3 +98,26 @@ class MemoryRepository(Repository):
 
     async def get_report(self, conversation_id):
         return self.reports.get(conversation_id)
+
+    async def get_trial_mission(self, principal_id):
+        return self.trials.get(principal_id)
+
+    async def set_trial_mission(self, principal_id, mission_id):
+        self.trials[principal_id] = mission_id
+
+    async def get_subscription(self, principal_id):
+        s = self.subscriptions.get(principal_id)
+        return s.model_copy() if s else None
+
+    async def find_subscription(self, razorpay_subscription_id):
+        return next((s.model_copy() for s in self.subscriptions.values()
+                     if s.razorpay_subscription_id == razorpay_subscription_id), None)
+
+    async def save_subscription(self, sub):
+        self.subscriptions[sub.principal_id] = sub.model_copy()
+
+    async def talk_seconds(self, principal_id, *, since=None, mission_id=None):
+        mine = {m.id for m in self.missions.values() if m.principal_id == principal_id}
+        return sum(c.talk_seconds for c in self.conversations.values()
+                   if c.mission_id in mine and (mission_id is None or c.mission_id == mission_id)
+                   and (since is None or c.created_at >= since))

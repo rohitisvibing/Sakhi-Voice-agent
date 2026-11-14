@@ -9,6 +9,12 @@ import { StatusGlyph, missionGlyphState } from "@/components/orb/StatusGlyph";
 import { ErrorNote } from "@/components/shell/ErrorNote";
 import { MissionComposer } from "@/components/mission-builder/MissionComposer";
 import { cn } from "@/lib/utils";
+import { AnimatePresence } from "motion/react";
+import { useMe } from "@/components/shell/AuthGate";
+import { useBilling } from "@/hooks/useBilling";
+import { useStoredFlag } from "@/hooks/useStoredFlag";
+import { CallPill } from "@/components/billing/CallPill";
+import { WelcomeCall } from "@/components/onboarding/WelcomeCall";
 
 function missionHref(m: MissionSummary): string {
   if (m.conversation_id && (m.status === "active" || m.status === "completed" || m.status === "failed"))
@@ -36,8 +42,27 @@ export function Dashboard() {
     (a, b) => ORDER[a.status] - ORDER[b.status] || +new Date(b.last_activity) - +new Date(a.last_activity),
   );
 
+  const me = useMe();
+  const { billing, onTrial, firstVisit } = useBilling();
+  const [called, setCalled] = useStoredFlag(`envoy.called.${me?.id ?? "anon"}`, false);
+  const calling = Boolean(me) && firstVisit && !called;
+  const price = billing?.price_inr ?? 499;
+
   return (
-    <>
+    <div className={cn(onTrial && "pb-20")}>
+      <AnimatePresence>
+        {calling && (
+          <WelcomeCall
+            key="welcome"
+            price={price}
+            onClose={(choice) => {
+              setCalled(true);
+              if (choice === "start") setTimeout(() => document.getElementById("mission")?.focus(), 480);
+            }}
+          />
+        )}
+      </AnimatePresence>
+      <CallPill show={onTrial && !calling} used={billing?.status === "trial_used"} price={price} />
       <MissionComposer greeting={name} />
       <ErrorNote error={missions.error} className="mt-10" />
       {list.length > 0 && (
@@ -60,6 +85,6 @@ export function Dashboard() {
           })}
         </ul>
       )}
-    </>
+    </div>
   );
 }

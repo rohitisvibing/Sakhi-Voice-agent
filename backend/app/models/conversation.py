@@ -122,6 +122,7 @@ class Conversation(Schema):
     state: ConversationState = ConversationState.ready
     negotiation: NegotiationState = Field(default_factory=NegotiationState)
     voice_enabled: bool = True
+    talk_seconds: int = 0  # metered while the call is live (billing)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     ended_at: datetime | None = None

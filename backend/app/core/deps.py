@@ -2,6 +2,7 @@
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 from app.core.config import Settings, get_settings
 from app.providers.llm.base import LLMProvider
@@ -28,6 +29,7 @@ class Container:
     tts: TTSProvider
     repo: Repository
     translator: TranslationProvider | None = None
+    payments: Any = None  # a Razorpay client; tests swap in a fake
 
     @property
     def demo(self) -> bool:

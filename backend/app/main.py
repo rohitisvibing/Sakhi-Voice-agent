@@ -7,7 +7,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import approvals, conversations, missions, profiles
+from app.api import approvals, billing, conversations, missions, profiles
+from app.core.auth import router as auth_router
 from app.core.deps import get_container
 from app.core.errors import AppError
 from app.realtime import websocket_manager
@@ -51,8 +52,10 @@ async def health() -> dict:
     }
 
 
+app.include_router(auth_router)
 app.include_router(profiles.router)
 app.include_router(missions.router)
 app.include_router(conversations.router)
 app.include_router(approvals.router)
+app.include_router(billing.router)
 app.include_router(websocket_manager.router)

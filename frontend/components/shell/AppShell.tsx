@@ -7,12 +7,31 @@ import { cn } from "@/lib/utils";
 import { StatusGlyph } from "@/components/orb/StatusGlyph";
 import { DemoBadge } from "./DemoBadge";
 import { AmbientGlow } from "./AmbientGlow";
+import { useMe } from "./AuthGate";
 
 export function Wordmark() {
   return (
     <Link href="/" className="flex items-center gap-2 rounded-full pr-1 text-ink" aria-label="Envoy home">
       <StatusGlyph state="ready" size={20} label="Envoy" />
       <span className="font-serif text-[22px] leading-none tracking-[-0.01em]">Envoy</span>
+    </Link>
+  );
+}
+
+function ProfileLink() {
+  const me = useMe();
+  return (
+    <Link
+      href="/profile"
+      aria-label="About you"
+      className="grid size-10 place-items-center rounded-full text-ink-2 transition-colors hover:bg-elevated hover:text-ink"
+    >
+      {me?.avatar ? (
+        // eslint-disable-next-line @next/next/no-img-element -- a tiny remote avatar; no optimisation needed
+        <img src={me.avatar} alt="" referrerPolicy="no-referrer" className="size-7 rounded-full ring-1 ring-line" />
+      ) : (
+        <UserRound className="size-5" />
+      )}
     </Link>
   );
 }
@@ -36,13 +55,7 @@ export function AppShell({
             <Wordmark />
             <DemoBadge />
           </span>
-          <Link
-            href="/profile"
-            aria-label="About you"
-            className="grid size-10 place-items-center rounded-full text-ink-2 transition-colors hover:bg-elevated hover:text-ink"
-          >
-            <UserRound className="size-5" />
-          </Link>
+          <ProfileLink />
         </div>
       </header>
       <main

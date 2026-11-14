@@ -45,6 +45,21 @@ class Settings(BaseSettings):
 
     # App
     demo_mode: bool = False
+    # Sign-in (Supabase Auth with Google). Required whenever SUPABASE_URL is set, unless disabled.
+    auth_disabled: bool = False
+    supabase_jwt_secret: str = ""  # only for legacy HS256-signed projects (optional)
+    # Per-user daily caps on the calls that spend LLM and speech credits (0 = no cap).
+    max_missions_per_day: int = 30
+    max_conversations_per_day: int = 20
+
+    # Billing (Razorpay subscription). Off when the keys are unset: everything is free.
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+    razorpay_plan_id: str = ""
+    plan_price_inr: int = 499
+    monthly_talk_minutes: int = 180  # never shown in the UI
+    trial_talk_minutes: int = 3      # the free mission's hidden cap, across its calls
     text_pacing: bool = True  # text-only mode waits ~reading time between turns
     # Practice mode: compute the next line while the current one is still being spoken.
     speculate: bool = True
@@ -67,6 +82,10 @@ class Settings(BaseSettings):
     @property
     def speech_configured(self) -> bool:
         return bool(self.sarvam_api_key)
+
+    @property
+    def billing_configured(self) -> bool:
+        return bool(self.razorpay_key_id and self.razorpay_key_secret and self.razorpay_plan_id)
 
     @property
     def db_configured(self) -> bool:

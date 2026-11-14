@@ -1,6 +1,8 @@
 """WebSocket endpoint: one socket per client per conversation.
 
 Client -> server
+  first frame, when sign-in is on: {"type": "auth", "token": <Supabase access token>}
+    (no or bad token: close 4401; someone else's conversation: close 4404)
   binary frames: mono PCM16 @16 kHz microphone audio (live mode)
   JSON: {"type": "start"|"pause"|"resume"|"interrupt"|"end"|"mute"|"unmute"|"takeover"
                  |"release"|"ping"}
@@ -17,12 +19,15 @@ Server -> client
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
+from app.api.ownership import owned_conversation
+from app.core.auth import auth_required, authenticate
 from app.core.deps import get_container
 from app.core.errors import AppError
 from app.models.conversation import ApprovalDecision
@@ -38,6 +43,15 @@ async def conversation_socket(ws: WebSocket, conversation_id: str) -> None:
     await ws.accept()
     c = get_container()
     try:
+        pid = await authenticate(c, await _auth_frame(ws) if auth_required(c.settings) else None)
+    except (AppError, TimeoutError, ValueError, WebSocketDisconnect) as e:
+        if isinstance(e, AppError):
+            await _try_send(ws, {"type": "error", "error": e.to_dict() | {"fatal": True}})
+        await _try_close(ws, 4401)
+        return
+    try:
+        live = manager.peek(conversation_id)
+        await owned_conversation(c, conversation_id, pid, live.conv if live else None)
         session = await manager.get(c, conversation_id)
     except AppError as e:
         await ws.send_json({"type": "error", "error": e.to_dict() | {"fatal": True}})
@@ -76,9 +90,31 @@ async def conversation_socket(ws: WebSocket, conversation_id: str) -> None:
         session.detach(sink)
 
 
+async def _auth_frame(ws: WebSocket) -> str | None:
+    """Browsers can't set headers on a WebSocket, so the token comes as the first frame."""
+    async with asyncio.timeout(10):
+        first = json.loads(await ws.receive_text())
+    if not isinstance(first, dict) or first.get("type") != "auth":
+        return None
+    token = first.get("token")
+    return token if isinstance(token, str) else None
+
+
+async def _try_send(ws: WebSocket, msg: dict) -> None:
+    with contextlib.suppress(Exception):  # the client may already be gone
+        await ws.send_json(msg)
+
+
+async def _try_close(ws: WebSocket, code: int) -> None:
+    with contextlib.suppress(Exception):
+        await ws.close(code=code)
+
+
 async def _dispatch(session, p: dict, sink) -> None:
     t = p.get("type")
     match t:
+        case "auth":
+            pass  # sign-in is checked once, at connect; a late or repeated frame is harmless
         case "ping":
             await sink({"type": "pong"})
         case "start":

@@ -10,3 +10,5 @@ frontend/next-env.d.ts
 supabase/.temp/
 supabase/.branches/
 .DS_Store
+.vercel
+.env*

@@ -47,7 +47,7 @@ class OpenRouterProvider(LLMProvider):
                 base_url=self.settings.openrouter_base_url,
                 timeout=self.settings.llm_timeout_s,
                 headers={"Authorization": f"Bearer {self.settings.openrouter_api_key}",
-                         "X-Title": "Envoy Voice Agents"},
+                         "X-Title": "Sakhi Voice Agents"},
             )
         return self._client
 

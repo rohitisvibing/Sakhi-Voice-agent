@@ -2,7 +2,7 @@
 
 import json
 
-from app.models.mission import MissionSpec, PreparationBrief
+from app.models.mission import MissionSpec, PreparationBrief, agent_name
 from app.models.principal import PrincipalProfile
 from app.providers.llm.base import LLMProvider, Message
 
@@ -18,7 +18,7 @@ async def prepare(llm: LLMProvider, spec: MissionSpec, profile: PrincipalProfile
         + "\n\nPRINCIPAL PROFILE (disclosure-filtered):\n"
         + json.dumps(profile_context(profile), ensure_ascii=False)
         + f"\n\nShareable principal name: {profile.display_name()}"
-        + f"\nAGENT NAME: {spec.communication.agent_name or '(none)'}"
+        + f"\nAGENT NAME: {agent_name(spec)}"
         + f"\nANNOUNCE AI: {'yes' if spec.communication.announce_ai else 'no'}"
     )
     brief = await llm.complete_json(
@@ -27,6 +27,7 @@ async def prepare(llm: LLMProvider, spec: MissionSpec, profile: PrincipalProfile
     )
     if spec.communication.announce_ai and not _AI_DISCLOSURE.search(brief.opening_statement):
         brief.opening_statement = (
-            f"Hello, I'm an AI assistant calling on behalf of {profile.display_name()}. "
+            f"Hello, I'm {agent_name(spec)}, an AI assistant calling on behalf of "
+            f"{profile.display_name()}. "
             + brief.opening_statement)
     return brief

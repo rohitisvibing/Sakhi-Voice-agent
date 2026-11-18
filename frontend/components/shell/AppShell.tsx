@@ -11,9 +11,9 @@ import { useMe } from "./AuthGate";
 
 export function Wordmark() {
   return (
-    <Link href="/" className="flex items-center gap-2 rounded-full pr-1 text-ink" aria-label="Envoy home">
-      <StatusGlyph state="ready" size={20} label="Envoy" />
-      <span className="font-serif text-[22px] leading-none tracking-[-0.01em]">Envoy</span>
+    <Link href="/" className="flex items-center gap-2 rounded-full pr-1 text-ink" aria-label="Sakhi home">
+      <StatusGlyph state="ready" size={20} label="Sakhi" />
+      <span className="font-serif text-[22px] leading-none tracking-[-0.01em]">Sakhi</span>
     </Link>
   );
 }

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-export const metadata: Metadata = { title: "Terms, privacy and refunds · Envoy" };
+export const metadata: Metadata = { title: "Terms, privacy and refunds · Sakhi" };
 
 // Review before going live: replace the bracketed details with your own.
 const CONTACT_EMAIL = "[support email]";
@@ -21,7 +21,7 @@ export default function Legal() {
   return (
     <main className="mx-auto w-full max-w-2xl px-4 pb-24 pt-12 sm:px-6">
       <Link href="/" className="text-meta text-ink-3 hover:text-ink-2">
-        ← Envoy
+        ← Sakhi
       </Link>
       <h1 className="mt-6 font-serif text-[2.75rem] leading-none text-ink">Terms, privacy and refunds</h1>
       <nav className="mt-6 flex flex-wrap gap-x-4 gap-y-1 text-meta text-ink-3" aria-label="Sections">
@@ -34,7 +34,7 @@ export default function Legal() {
       <div className="mt-12 space-y-14">
         <Section id="terms" title="Terms">
           <p>
-            Envoy is operated by {BUSINESS}. It places conversations on your behalf, using an AI voice agent that
+            Sakhi is operated by {BUSINESS}. It places conversations on your behalf, using an AI voice agent that
             follows the goals and limits you set. You are responsible for what you ask it to do, and for using it lawfully
             and respectfully toward the people it speaks with.
           </p>
@@ -43,7 +43,7 @@ export default function Legal() {
             beyond the limits you set without asking you first. Outcomes of a negotiation are not guaranteed.
           </p>
           <p>
-            Your first mission is free. After that, Envoy is a monthly subscription, billed in advance through Razorpay
+            Your first mission is free. After that, Sakhi is a monthly subscription, billed in advance through Razorpay
             and renewed automatically each month until you cancel. Fair use applies to talk time.
           </p>
         </Section>
@@ -63,11 +63,11 @@ export default function Legal() {
 
         <Section id="refunds" title="Cancellation and refunds">
           <p>
-            You can cancel anytime from your profile. Cancelling stops future renewals; Envoy keeps working until the
+            You can cancel anytime from your profile. Cancelling stops future renewals; Sakhi keeps working until the
             end of the period you&apos;ve paid for.
           </p>
           <p>
-            If you were charged by mistake, or Envoy didn&apos;t work for you because of a fault on our side, write to
+            If you were charged by mistake, or Sakhi didn&apos;t work for you because of a fault on our side, write to
             us within 7 days of the charge and we&apos;ll refund it. Approved refunds reach your original payment method
             within 5–7 working days.
           </p>

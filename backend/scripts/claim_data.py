@@ -31,9 +31,9 @@ async def main(email: str, with_profile: bool, dry_run: bool) -> None:
         user = next((u for u in users if (u.email or "").lower() == email.lower()), None)
         page += 1
     if user is None:
-        sys.exit(f"No account for {email}. Sign in to Envoy with it once, then rerun.")
+        sys.exit(f"No account for {email}. Sign in to Sakhi with it once, then rerun.")
     if not (await db.table("principals").select("id").eq("id", user.id).execute()).data:
-        sys.exit(f"{email} hasn't opened Envoy yet. Sign in once, then rerun.")
+        sys.exit(f"{email} hasn't opened Sakhi yet. Sign in once, then rerun.")
 
     missions = (await db.table("missions").select("id,title").eq("principal_id", legacy)
                 .execute()).data

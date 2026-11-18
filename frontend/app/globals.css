@@ -45,7 +45,7 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Envoy tokens: an indigo night lit by the agent's voice. Dark only. */
+/* Sakhi tokens: an indigo night lit by the agent's voice. Dark only. */
 :root,
 .dark {
   color-scheme: dark;

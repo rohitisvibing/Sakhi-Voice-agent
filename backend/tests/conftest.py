@@ -62,7 +62,7 @@ def rent_spec() -> MissionSpec:
 
 @pytest.fixture
 def brief() -> PreparationBrief:
-    return PreparationBrief(opening_statement="Hello, I'm an assistant calling on behalf of "
+    return PreparationBrief(opening_statement="Hello, this is Sakhi, calling on behalf of "
                                               "Ananya about the rent.")
 
 

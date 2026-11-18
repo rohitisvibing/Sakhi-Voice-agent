@@ -41,13 +41,13 @@ function loadCheckout(): Promise<void> {
   return checkoutScript;
 }
 
-/** Razorpay Checkout for the subscription; resolves when Envoy has confirmed the payment. */
+/** Razorpay Checkout for the subscription; resolves when Sakhi has confirmed the payment. */
 function pay(sub: { subscription_id: string; key_id: string }, me: { name: string | null; email: string | null } | null) {
   return new Promise<RazorpayResponse | null>((resolve, reject) => {
     const rzp = new window.Razorpay!({
       key: sub.key_id,
       subscription_id: sub.subscription_id,
-      name: "Envoy",
+      name: "Sakhi",
       description: "Monthly plan",
       prefill: { name: me?.name ?? undefined, email: me?.email ?? undefined },
       theme: { color: "#9db0ff" },
@@ -102,7 +102,7 @@ export function PaywallSheet() {
       >
         <StatusGlyph state="ready" size={32} label="" />
         <SheetTitle className="mt-5 font-serif text-[2rem] font-normal leading-[1.05] text-ink">
-          Keep Envoy working for you
+          Keep Sakhi working for you
         </SheetTitle>
         <SheetDescription className="mt-3 text-body text-ink-2">Unlimited missions. Cancel anytime.</SheetDescription>
         <p className="mt-7 font-serif text-[3rem] leading-none text-ink tabular">

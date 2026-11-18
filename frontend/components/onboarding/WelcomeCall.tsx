@@ -18,7 +18,7 @@ function clock(s: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-/** Envoy's first move is to call you: ring, answer, it speaks, you reply. */
+/** Sakhi's first move is to call you: ring, answer, she speaks, you reply. */
 export function WelcomeCall({ price, onClose }: { price: number; onClose: (choice: WelcomeChoice) => void }) {
   const me = useMe();
   const reduce = useReducedMotion();
@@ -85,7 +85,7 @@ export function WelcomeCall({ price, onClose }: { price: number; onClose: (choic
   });
 
   const orbState: ConversationState = step === "ringing" ? "connecting" : step === "speaking" ? "speaking" : "ready";
-  const spoken = voice.lines.map((l, i) => (i === 0 && first ? `Hi ${first}, I'm Envoy.` : l.text));
+  const spoken = voice.lines.map((l, i) => (i === 0 && first ? `Hi ${first}, I'm Sakhi.` : l.text));
   const said = step === "reply" ? spoken.length - 1 : voice.line;
 
   return (
@@ -104,7 +104,7 @@ export function WelcomeCall({ price, onClose }: { price: number; onClose: (choic
 
       {step === "ringing" ? (
         <div className="relative z-10 mx-auto flex w-full max-w-sm flex-1 flex-col items-center justify-between px-6 pb-[calc(3rem+env(safe-area-inset-bottom))] pt-[calc(3.5rem+env(safe-area-inset-top))] text-center">
-          <p className="text-meta text-ink-3">Envoy</p>
+          <p className="text-meta text-ink-3">Sakhi</p>
           <div className="flex flex-col items-center">
             <div className="relative grid size-52 place-items-center">
               {!reduce &&
@@ -119,11 +119,11 @@ export function WelcomeCall({ price, onClose }: { price: number; onClose: (choic
                   />
                 ))}
               <div className="size-44">
-                <AgentOrb state="connecting" label="Envoy is calling" />
+                <AgentOrb state="connecting" label="Sakhi is calling" />
               </div>
             </div>
             <h1 id="welcome-title" className="mt-8 font-serif text-[2.5rem] leading-none tracking-[-0.01em] text-ink">
-              Envoy is calling
+              Sakhi is calling
             </h1>
             {first && <p className="mt-3 text-body text-ink-2">Hi, {first}</p>}
           </div>
@@ -140,10 +140,10 @@ export function WelcomeCall({ price, onClose }: { price: number; onClose: (choic
         <div className="relative z-10 mx-auto flex w-full max-w-md flex-1 flex-col px-6 pb-[calc(2.5rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))]">
           <header className="flex items-center gap-3">
             <div className="size-12 shrink-0">
-              <AgentOrb state={orbState} levelRef={voice.levelRef} label="Envoy" />
+              <AgentOrb state={orbState} levelRef={voice.levelRef} label="Sakhi" />
             </div>
             <h1 id="welcome-title" className="text-body font-medium text-ink">
-              Envoy
+              Sakhi
             </h1>
             {answered && (
               <span className="text-meta text-ink-3 tabular" aria-label={`Call time ${clock(seconds)}`}>
@@ -154,7 +154,7 @@ export function WelcomeCall({ price, onClose }: { price: number; onClose: (choic
               <button
                 type="button"
                 onClick={() => voice.setMuted(!voice.muted)}
-                aria-label={voice.muted ? "Unmute Envoy" : "Mute Envoy"}
+                aria-label={voice.muted ? "Unmute Sakhi" : "Mute Sakhi"}
                 aria-pressed={voice.muted}
                 className="ml-auto grid size-10 place-items-center rounded-full text-ink-2 transition-colors hover:bg-elevated hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-aurora"
               >

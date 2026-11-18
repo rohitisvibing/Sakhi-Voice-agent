@@ -35,14 +35,23 @@ class Counterparty(Schema):
     notes: str | None = None
 
 
+DEFAULT_AGENT_NAME = "Sakhi"
+
+
 class Communication(Schema):
     languages: list[str] = Field(default_factory=lambda: ["English"])
     tone: str = "polite and clear"
     personality: str | None = None
     agent_name: str | None = Field(
-        default=None, description="Name the agent introduces itself with, if the person gave one")
+        default=None, description="Name the agent introduces itself with, if the person gave one "
+        "(otherwise she is Sakhi)")
     announce_ai: bool = Field(
         default=False, description="Say up front that the caller is an AI assistant")
+
+
+def agent_name(spec: "MissionSpec") -> str:
+    """The name the agent speaks as: the one the person gave, or Sakhi."""
+    return (spec.communication.agent_name or "").strip() or DEFAULT_AGENT_NAME
 
 
 class ApprovalRequirement(Schema):

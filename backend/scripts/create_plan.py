@@ -19,7 +19,7 @@ async def main() -> None:
     s = get_settings()
     if not (s.razorpay_key_id and s.razorpay_key_secret):
         sys.exit("Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env first.")
-    plan = await Razorpay(s).create_plan(amount_paise=s.plan_price_inr * 100, name="Envoy")
+    plan = await Razorpay(s).create_plan(amount_paise=s.plan_price_inr * 100, name="Sakhi")
     mode = "test" if s.razorpay_key_id.startswith("rzp_test_") else "live"
     print(f"Created {mode} plan: ₹{s.plan_price_inr}/month")
     print(f"RAZORPAY_PLAN_ID={plan['id']}")

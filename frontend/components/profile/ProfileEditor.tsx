@@ -214,7 +214,7 @@ function PlanRow() {
     mutationFn: api.cancelSubscription,
     onSuccess: (b) => {
       qc.setQueryData(["billing"], b);
-      toast("Cancelled. Envoy keeps working until " + day(b.renews_on) + ".");
+      toast("Cancelled. Sakhi keeps working until " + day(b.renews_on) + ".");
     },
     onError: (e) => toast.error(e.message),
   });
@@ -224,7 +224,7 @@ function PlanRow() {
       <span className="min-w-0 truncate text-ink-2">
         {paid ? (
           <>
-            Envoy <span className="text-ink-3">· {b.cancel_at_period_end ? "ends" : "renews"} {day(b.renews_on)}</span>
+            Sakhi <span className="text-ink-3">· {b.cancel_at_period_end ? "ends" : "renews"} {day(b.renews_on)}</span>
           </>
         ) : (
           "Free trial"
@@ -236,7 +236,7 @@ function PlanRow() {
             type="button"
             disabled={cancel.isPending}
             onClick={() => {
-              if (window.confirm("Cancel your plan? Envoy keeps working until " + day(b.renews_on) + ".")) cancel.mutate();
+              if (window.confirm("Cancel your plan? Sakhi keeps working until " + day(b.renews_on) + ".")) cancel.mutate();
             }}
             className="shrink-0 rounded-full px-3 py-1.5 text-ink-3 transition-colors hover:bg-elevated hover:text-ink"
           >

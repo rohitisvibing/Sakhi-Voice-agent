@@ -229,7 +229,7 @@ export function MissionReview({ id }: { id: string }) {
           <Fact label="Agent's name">
             <input
               aria-label="The name the agent introduces itself with"
-              placeholder="Unnamed"
+              placeholder="Sakhi"
               value={spec.communication.agent_name ?? ""}
               onChange={(e) => set("communication", { ...spec.communication, agent_name: e.target.value || null })}
               className={cn(inline, "text-body")}

@@ -21,7 +21,7 @@ from app.providers.tts.base import Voice
 from app.providers.tts.sarvam import SarvamTTS
 
 LINES = [
-    "Hi, I'm Envoy.",
+    "Hi, I'm Sakhi.",
     ("Tell me what you need, a lower rent, a fair fare, a booking, "
      "and I'll make the call for you."),
     "Your first mission is on me.",

@@ -24,7 +24,7 @@ async def lifespan(_app: FastAPI):
     await manager.shutdown()
 
 
-app = FastAPI(title="Envoy voice agents", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Sakhi voice agents", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in get_container().settings.cors_origins.split(",")],

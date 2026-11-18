@@ -10,8 +10,8 @@ const kannada = Noto_Sans_Kannada({ variable: "--font-kannada", subsets: ["kanna
 const devanagari = Noto_Sans_Devanagari({ variable: "--font-devanagari", subsets: ["devanagari"], display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Envoy",
-  description: "Tell it what you want. It makes the call.",
+  title: "Sakhi",
+  description: "Tell her what you want. She makes the call.",
 };
 
 export const viewport: Viewport = {

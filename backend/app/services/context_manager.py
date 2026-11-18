@@ -7,7 +7,7 @@ until the principal approves a disclosure, which applies to a single turn.
 import json
 
 from app.models.conversation import NegotiationState
-from app.models.mission import MissionSpec, PreparationBrief
+from app.models.mission import MissionSpec, PreparationBrief, agent_name
 from app.models.principal import Disclosure, PrincipalProfile
 from app.models.transcript import EventKind, Speaker, TranscriptEvent
 
@@ -47,7 +47,9 @@ def profile_context(profile: PrincipalProfile, approved: dict[str, str] | None =
 
 
 def mission_context(spec: MissionSpec) -> dict:
-    return spec.model_dump(mode="json", exclude_none=True)
+    ctx = spec.model_dump(mode="json", exclude_none=True)
+    ctx.setdefault("communication", {})["agent_name"] = agent_name(spec)
+    return ctx
 
 
 def _line(e: TranscriptEvent) -> str | None:

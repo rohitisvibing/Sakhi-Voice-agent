@@ -2,18 +2,18 @@
   "lines": [
     {
       "src": "/welcome/1.m4a",
-      "text": "Hi, I'm Envoy.",
-      "duration": 1.89
+      "text": "Hi, I'm Sakhi.",
+      "duration": 1.53
     },
     {
       "src": "/welcome/2.m4a",
       "text": "Tell me what you need, a lower rent, a fair fare, a booking, and I'll make the call for you.",
-      "duration": 5.54
+      "duration": 7.14
     },
     {
       "src": "/welcome/3.m4a",
       "text": "Your first mission is on me.",
-      "duration": 1.75
+      "duration": 1.97
     }
   ]
 }

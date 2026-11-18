@@ -20,7 +20,7 @@ def enabled(c: Container) -> bool:
     return c.settings.billing_configured
 
 
-def needs_subscription(message: str = "Subscribe to keep Envoy working for you.") -> AppError:
+def needs_subscription(message: str = "Subscribe to keep Sakhi working for you.") -> AppError:
     return AppError(ErrorKind.payment_required, message, detail={"reason": "subscribe"})
 
 

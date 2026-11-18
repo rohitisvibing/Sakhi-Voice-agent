@@ -8,6 +8,7 @@ from app.models.mission import ExtractRequest
 from app.models.transcript import EventKind, Speaker
 from app.providers.translate.base import TranslationProvider
 from app.services import strategy_engine
+from app.services.context_manager import mission_context
 from app.services.objective_engine import extract
 
 from .fakes import ScriptedLLM
@@ -169,9 +170,35 @@ async def test_agent_name_from_the_request_reaches_the_opening(container, profil
 
 
 async def test_old_openings_that_announce_ai_are_rewritten(make_session):
-    llm = ScriptedLLM({"turn": [turn("Hi, this is an assistant calling for Ananya.")]})
+    llm = ScriptedLLM({"turn": [turn("Hi, this is Sakhi, calling for Ananya.")]})
     s = make_session(llm)
-    s.mission.brief.opening_statement = "Hello, I'm an AI assistant calling for Ananya."
+    s.mission.brief.opening_statement = "Hello, I'm Sakhi, an AI assistant calling for Ananya."
     await s.start()
     await settle(s)
-    assert s.events[-1].text == "Hi, this is an assistant calling for Ananya."
+    assert s.events[-1].text == "Hi, this is Sakhi, calling for Ananya."
+
+
+async def test_unnamed_agent_is_sakhi(container, profile, rent_spec):
+    assert rent_spec.communication.agent_name is None
+    assert mission_context(rent_spec)["communication"]["agent_name"] == "Sakhi"
+    brief = await strategy_engine.prepare(container.llm, rent_spec, profile)
+    assert "this is Sakhi" in brief.opening_statement
+
+
+async def test_openings_without_her_name_are_redone_live(make_session):
+    llm = ScriptedLLM({"turn": [turn("Hi, this is Sakhi, calling for Ananya.")]})
+    s = make_session(llm)
+    s.mission.brief.opening_statement = "Hello, I'm an assistant calling for Ananya."
+    await s.start()
+    await settle(s)
+    assert s.events[-1].text == "Hi, this is Sakhi, calling for Ananya."
+    assert "introduce yourself by your name" in llm.last_prompt("turn")
+
+
+async def test_an_opening_in_another_script_still_counts(make_session):
+    s = make_session(ScriptedLLM({"turn": []}))
+    s.mission.brief.opening_statement = "ನಮಸ್ಕಾರ, ನಾನು ಸಖಿ, ಅನನ್ಯ ಅವರ ಪರವಾಗಿ ಕರೆ ಮಾಡುತ್ತಿದ್ದೇನೆ."
+    await s.start()
+    await settle(s)
+    agent = [e.text for e in s.events if e.speaker == Speaker.agent]
+    assert agent and agent[0].startswith("ನಮಸ್ಕಾರ")

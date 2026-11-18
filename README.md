@@ -1,6 +1,6 @@
-# Envoy: objective-driven multilingual voice agents
+# Sakhi: objective-driven multilingual voice agents
 
-Describe a conversation you want handled ("negotiate my rent from ₹35,000 to ₹30,000, don't go above ₹32,000 without asking me, speak Kannada if he prefers"). Envoy turns the request into a structured mission. You review and edit it, then an agent prepares a strategy and holds the conversation by voice. You can watch, type instructions mid-call, approve or reject commitments, take over, and get an outcome report at the end.
+Describe a conversation you want handled ("negotiate my rent from ₹35,000 to ₹30,000, don't go above ₹32,000 without asking me, speak Kannada if he prefers"). Sakhi turns the request into a structured mission. You review and edit it, then an agent prepares a strategy and holds the conversation by voice. You can watch, type instructions mid-call, approve or reject commitments, take over, and get an outcome report at the end.
 
 ```
 Describe → Review mission → Prepare agent → Start → Voice conversation → Intervene / approve → Outcome report

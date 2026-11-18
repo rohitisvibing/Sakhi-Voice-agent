@@ -83,9 +83,9 @@ function SignIn() {
     <div className="relative grid min-h-dvh place-items-center px-4">
       <AmbientGlow state="ready" />
       <div className="relative z-10 flex w-full max-w-sm flex-col items-center text-center">
-        <StatusGlyph state="ready" size={32} label="Envoy" />
-        <h1 className="mt-4 font-serif text-[2.5rem] leading-none tracking-[-0.01em] text-ink">Envoy</h1>
-        <p className="mt-3 text-body text-ink-2">Tell it what you want. It makes the call.</p>
+        <StatusGlyph state="ready" size={32} label="Sakhi" />
+        <h1 className="mt-4 font-serif text-[2.5rem] leading-none tracking-[-0.01em] text-ink">Sakhi</h1>
+        <p className="mt-3 text-body text-ink-2">Tell her what you want. She makes the call.</p>
         <button
           type="button"
           disabled={busy}

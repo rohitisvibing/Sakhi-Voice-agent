@@ -27,7 +27,7 @@ from app.models.conversation import (
     can_transition,
 )
 from app.models.engine import TurnPlan
-from app.models.mission import Mission, MissionStatus
+from app.models.mission import DEFAULT_AGENT_NAME, Mission, MissionStatus, agent_name
 from app.models.principal import PrincipalProfile
 from app.models.transcript import EventKind, Speaker, TranscriptEvent
 from app.providers.languages import to_code, to_name
@@ -79,6 +79,14 @@ WRAP_UP_DIRECTIVE = (
     "Talk time is up. Close the call now, politely and briefly: say you need to stop here "
     "and that the principal will follow up. Make no new offers. Set end_conversation=true.")
 _SAYS_AI = re.compile(r"\b(ai|a\.i\.|artificial intelligence)\b|ಎಐ|एआई|ஏஐ|ఏఐ", re.IGNORECASE)
+# Sakhi as written in the scripts an opening may use.
+_SAKHI_SCRIPTS = ("सखी", "सखि", "ಸಖಿ", "சகி", "సఖి", "সখী", "സഖി", "સખી", "ਸਖੀ")
+
+
+def _names_agent(opening: str, name: str) -> bool:
+    if name.casefold() in opening.casefold():
+        return True
+    return name == DEFAULT_AGENT_NAME and any(s in opening for s in _SAKHI_SCRIPTS)
 
 
 class LiveSession:
@@ -490,9 +498,12 @@ class LiveSession:
                                               if self.conv.mode == ConversationMode.simulated
                                               else ". Listening through your microphone"))
         brief = self.mission.brief
-        # Openings prepared before AI announcements became optional still say it: re-open.
-        stale = brief is not None and not self.spec.communication.announce_ai \
-            and _SAYS_AI.search(brief.opening_statement) is not None
+        # Openings prepared before AI announcements became optional still say it, and ones
+        # prepared before the agent had a name don't give it: re-open live in both cases.
+        stale = brief is not None and (
+            (not self.spec.communication.announce_ai
+             and _SAYS_AI.search(brief.opening_statement) is not None)
+            or not _names_agent(brief.opening_statement, agent_name(self.spec)))
         if brief and not stale:
             plan = TurnPlan(response_text=brief.opening_statement,
                             response_language=brief.opening_language)
@@ -500,8 +511,8 @@ class LiveSession:
             await self.speak_agent_plan(plan)
         else:
             await self.run_agent_turn(
-                directive="Open the conversation: introduce yourself (by your name, if you have "
-                          "one) as calling on the principal's behalf, then state the purpose.",
+                directive="Open the conversation: introduce yourself by your name as calling on "
+                          "the principal's behalf, then state the purpose.",
                 is_opening=True)
 
     async def _save_mission(self) -> None:

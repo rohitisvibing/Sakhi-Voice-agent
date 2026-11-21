@@ -5,7 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { usePathname } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/services/api";
-import { signInWithGoogle, supabase } from "@/lib/supabase";
+import { signInWithGoogle, signInWithPassword, supabase } from "@/lib/supabase";
 import { StatusGlyph } from "@/components/orb/StatusGlyph";
 import { AmbientGlow } from "./AmbientGlow";
 
@@ -107,8 +107,92 @@ function SignIn() {
         <p role="alert" className="mt-3 min-h-5 text-meta text-error">
           {error}
         </p>
+        <EmailSignIn onError={setError} />
       </div>
     </div>
+  );
+}
+
+const field =
+  "h-12 w-full rounded-full bg-surface px-5 text-body text-ink ring-1 ring-line placeholder:text-ink-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-aurora";
+
+/** Accounts made by an admin (e.g. a reviewer's test login) sign in here; nobody signs up here. */
+function EmailSignIn({ onError }: { onError: (e: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const emailRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) emailRef.current?.focus();
+  }, [open]);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-2 rounded-full px-3 py-1.5 text-meta text-ink-2 underline-offset-4 hover:text-ink hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-aurora"
+      >
+        Sign in with email
+      </button>
+    );
+  }
+  return (
+    <form
+      className="mt-2 flex w-full flex-col gap-3"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        onError(null);
+        let ok = false;
+        try {
+          ok = await signInWithPassword(email.trim(), password);
+        } catch {
+          ok = false;
+        }
+        if (!ok) {
+          onError("That email and password don't match.");
+          setBusy(false);
+        }
+      }}
+    >
+      <label htmlFor="signin-email" className="sr-only">
+        Email
+      </label>
+      <input
+        id="signin-email"
+        ref={emailRef}
+        type="email"
+        autoComplete="email"
+        required
+        placeholder="Email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        className={field}
+      />
+      <label htmlFor="signin-password" className="sr-only">
+        Password
+      </label>
+      <input
+        id="signin-password"
+        type="password"
+        autoComplete="current-password"
+        required
+        placeholder="Password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        className={field}
+      />
+      <button
+        type="submit"
+        disabled={busy}
+        className="h-12 rounded-full px-6 text-body font-medium text-aurora ring-1 ring-aurora/40 transition-colors hover:bg-aurora-soft disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-aurora"
+      >
+        {busy ? "Signing in…" : "Sign in"}
+      </button>
+    </form>
   );
 }
 

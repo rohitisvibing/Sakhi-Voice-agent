@@ -25,3 +25,10 @@ export async function signInWithGoogle() {
   const here = window.location.origin + window.location.pathname + window.location.search;
   await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: here } });
 }
+
+/** Email and password sign-in, for accounts created by an admin (no sign-up form). */
+export async function signInWithPassword(email: string, password: string): Promise<boolean> {
+  if (!supabase) return false;
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  return !error;
+}

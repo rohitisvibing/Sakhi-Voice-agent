@@ -60,4 +60,5 @@ export const APPROVAL_LABEL: Record<ApprovalKind, string> = {
   negotiation_authority: "Going past your range",
   financial: "Spending money",
   final_commitment: "Agreeing to a deal",
+  ivr_choice: "Choosing in a phone menu",
 };

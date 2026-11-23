@@ -184,10 +184,64 @@ Agent and simulated lines carry an English translation from the same model call.
 - **Orb:** a canvas dot-sphere whose parameters come only from the conversation state, plus the real RMS level of the playback analyser (speaking, simulated listening) or the mic analyser (live listening). Small status glyphs use [`thinking-orbs`](https://libraries.dev/orbs). Reduced motion renders static frames.
 - **Mobile:** audio unlocks on the Start tap. A wake lock is held while live. If the tab is backgrounded mid-conversation, the agent pauses and offers to resume.
 
+### Speaking your request
+
+The mic button in the home composer records up to 30 s with the same 16 kHz capture worklet the live calls use, encodes a WAV in the browser and posts it to `POST /api/transcribe`. That endpoint calls Sarvam's REST speech-to-text (`saaras:v4`, code-mixed). The text lands in the composer for you to review and edit. Nothing is submitted until you press Build mission, which runs the usual extraction pipeline.
+
+### Phone calls (Exotel)
+
+The prepare screen offers three modes:
+
+- **Practice:** a simulated counterparty.
+- **In person:** the browser microphone, as before.
+- **Phone call:** you choose who Sakhi calls, then confirm on a sheet. Only then is anything dialled. The dial API also requires `confirm: true`.
+
+You can choose the recipient in three ways:
+
+- the browser Contact Picker, on Chrome for Android;
+- people you've called before, searchable;
+- a typed number, normalised to E.164.
+
+How a call works:
+
+1. **Placing it.** `POST /api/conversations/{id}/dial` calls Exotel `Calls/connect` with `StreamType=bidirectional`.
+   - The stream URL (`/ws/telephony/exotel`) and the status callback URL (`/api/telephony/exotel/status`) carry our own HMAC-signed, expiring tokens. Exotel doesn't sign its requests.
+   - Credentials never leave the backend.
+2. **The audio bridge.** When the callee answers, Exotel opens the stream. `PhoneChannel` (`realtime/phone.py`) is the third `CounterpartyChannel`:
+   - Their 16 kHz PCM goes into the same Sarvam realtime STT.
+   - Sakhi's lines are rendered by a 16 kHz TTS instance and sent back in 100 ms frames.
+   - Each line ends with a `mark`, and playback counts as done when Exotel echoes it.
+   - Barge-in sends `clear` so queued audio stops at once.
+   - The same agent, guard, approvals, nudges and reports run the call. There is no phone-only logic.
+3. **Greeting and silence.**
+   - Sakhi lets the callee speak first (or opens after 3 s of silence).
+   - If they started talking, she waits for them to finish, so a menu can read out its options.
+   - After 8 s of silence she checks they're still there. After a second silence she says goodbye.
+4. **Phone menus (IVR).**
+   - The agent can return `dtmf` (`0-9 * #`, with `,` as a pause) instead of words.
+   - The keys are played as standard DTMF tones into the call, because Exotel has no "send digit" message.
+   - Keys are only accepted right after a menu has read out options.
+   - If no option clearly fits, she asks you through an `ivr_choice` approval.
+   - Choices are kept in `ivr_path`.
+5. **Vercel.** A call lives in the function holding Exotel's stream, which is capped at 300 s.
+   - Sakhi wraps up politely at `PHONE_CALL_LIMIT_SECONDS` (240).
+   - Your browser may land on another server. It then follows the call from the database, polling events and state, and its controls (end, nudges, approvals) go through the `call_commands` table to the call's server.
+6. **After the call.** The outcome report adds the call itself (who was called, the number, the duration and menu choices), what Sakhi found out, and follow-ups.
+
+To test locally without Exotel:
+
+```bash
+EXOTEL_SIMULATE=true TELEPHONY_SECRET=dev uv run uvicorn app.main:app --port 8000
+# place a phone call in the app, then copy stream_url=… from the backend log:
+uv run python scripts/exotel_sim.py "<stream_url>" --ivr --out call.wav
+```
+
+The simulator speaks Exotel's protocol and plays a phone menu and then "Rahul" with Sarvam voices. It echoes marks, decodes the keypad tones Sakhi sends, and saves her side of the call to `call.wav`.
+
 ## Tests
 
 ```bash
-cd backend && uv run pytest          # 130 tests
+cd backend && uv run pytest          # 158 tests
 cd frontend && pnpm lint && pnpm exec tsc --noEmit && pnpm build
 ```
 
@@ -204,6 +258,14 @@ Backend tests cover:
 - A full HTTP + WebSocket end-to-end run in demo mode.
 - Billing: the free trial mission, the paywall, Checkout and webhook signatures, renewals and cancellation, metering only live time, and a polite hang-up when talk time runs out.
 - Sign-in: bad, expired and foreign tokens; per-user isolation across every route and the socket; profile field ids; daily caps.
+- Dictation: transcription, length limits, missing keys.
+- Phone calls:
+  - number rules and signed, single-use tokens;
+  - dialling only with `confirm: true`;
+  - status callbacks that only move forward, and redialling;
+  - the greeting wait, 100 ms frames and marks, barge-in `clear`, silence check-ins, the call limit;
+  - keypad tones (frequency check), and phone menus with an ask-the-user fallback;
+  - the Exotel stream end to end, and hanging up from another server.
 
 ## Configuration
 
@@ -223,7 +285,10 @@ See `.env.example`. Every secret stays server-side. The frontend only knows `NEX
 | `MAX_MISSIONS_PER_DAY`, `MAX_CONVERSATIONS_PER_DAY` | Per-user daily caps (0 = none) |
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_PLAN_ID`, `RAZORPAY_WEBHOOK_SECRET` | Billing (off when unset) |
 | `PLAN_PRICE_INR`, `MONTHLY_TALK_MINUTES`, `TRIAL_TALK_MINUTES` | ₹499 / 180 min / 3 min by default; minutes are never shown |
+| `EXOTEL_SID`, `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, `EXOTEL_SUBDOMAIN`, `EXOTEL_CALLER_ID` | Phone calls (off when unset) |
+| `TELEPHONY_SECRET`, `PUBLIC_BASE_URL` | Signs the URLs given to Exotel; where Exotel reaches this backend |
+| `PHONE_CALL_LIMIT_SECONDS`, `EXOTEL_SIMULATE` | Call length cap (240 s on Vercel); local simulator instead of real calls |
 
 ## Out of scope (by design, for now)
 
-PSTN / outbound / inbound calling, WhatsApp, native apps. Telephony plugs in as a new `CounterpartyChannel` that feeds the same STT/TTS pipeline. The objective engine doesn't change.
+Inbound calls, call recording, calls longer than about 4 minutes (they would need a long-running server rather than a Vercel function), WhatsApp, native apps.

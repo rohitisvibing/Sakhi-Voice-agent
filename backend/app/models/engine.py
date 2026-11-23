@@ -59,6 +59,12 @@ class TurnSay(Schema):
     objective_met: bool = False
     end_conversation: bool = Field(default=False,
                                    description="True if response_text is a closing goodbye")
+    dtmf: str | None = Field(
+        default=None,
+        description="Phone calls only: keypad keys to press in an automated menu (0-9, *, #; "
+                    "',' is a short pause). Leave response_text empty when pressing keys.")
+    dtmf_label: str | None = Field(
+        default=None, description="What the key chooses, e.g. 'Hindi' or 'Billing'")
     hold: bool = Field(
         default=False,
         description="Only when acting on a new principal instruction with nothing worth saying "

@@ -5,7 +5,7 @@ from supabase import AsyncClient, acreate_client
 from app.core.config import Settings
 from app.models.billing import Subscription
 from app.models.common import utcnow
-from app.models.conversation import Approval, Conversation
+from app.models.conversation import Approval, Conversation, ConversationMode, Recipient
 from app.models.mission import AgentTemplate, Mission
 from app.models.principal import PrincipalProfile, ProfileField
 from app.models.report import OutcomeReport
@@ -16,6 +16,19 @@ from .base import Repository
 
 def _j(model) -> dict:
     return model.model_dump(mode="json")
+
+
+_PHONE_COLUMNS = ("recipient_name", "recipient_phone", "call_sid", "call_status")
+
+
+def _conv_row(conv: Conversation) -> dict:
+    """Phone columns are only written for phone calls, so other conversations keep working
+    on a database that hasn't had the phone-calls migration yet."""
+    row = _j(conv)
+    if conv.mode != ConversationMode.phone:
+        for k in _PHONE_COLUMNS:
+            row.pop(k, None)
+    return row
 
 
 class SupabaseRepository(Repository):
@@ -114,7 +127,7 @@ class SupabaseRepository(Repository):
 
     # conversations -------------------------------------------------------------------
     async def save_conversation(self, conv):
-        await (await self._t("conversations")).upsert(_j(conv)).execute()
+        await (await self._t("conversations")).upsert(_conv_row(conv)).execute()
         return conv
 
     async def get_conversation(self, conversation_id):
@@ -140,6 +153,49 @@ class SupabaseRepository(Repository):
         res = await (await self._t("transcript_events")).select("*") \
             .eq("conversation_id", conversation_id).order("ts").execute()
         return [TranscriptEvent.model_validate(r) for r in res.data]
+
+    async def list_events_since(self, conversation_id, since):
+        q = (await self._t("transcript_events")).select("*") \
+            .eq("conversation_id", conversation_id)
+        if since is not None:
+            q = q.gt("ts", since.isoformat())
+        res = await q.order("ts").execute()
+        return [TranscriptEvent.model_validate(r) for r in res.data]
+
+    # phone calls -----------------------------------------------------------------------
+    async def find_conversation_by_call(self, call_sid):
+        res = await (await self._t("conversations")).select("*").eq("call_sid", call_sid) \
+            .limit(1).execute()
+        return Conversation.model_validate(res.data[0]) if res.data else None
+
+    async def recent_recipients(self, principal_id, limit=20):
+        res = await (await self._t("conversations")) \
+            .select("recipient_name, recipient_phone, created_at, missions!inner(principal_id)") \
+            .eq("missions.principal_id", principal_id).eq("mode", "phone") \
+            .not_.is_("recipient_phone", "null") \
+            .order("created_at", desc=True).limit(100).execute()
+        seen, out = set(), []
+        for r in res.data:
+            phone = r.get("recipient_phone")
+            if phone and phone not in seen:
+                seen.add(phone)
+                out.append(Recipient(name=r.get("recipient_name") or phone, phone=phone))
+        return out[:limit]
+
+    async def add_call_command(self, conversation_id, type, payload):
+        await (await self._t("call_commands")).insert(
+            {"conversation_id": conversation_id, "type": type, "payload": payload}).execute()
+
+    async def take_call_commands(self, conversation_id):
+        t = await self._t("call_commands")
+        res = await t.select("*").eq("conversation_id", conversation_id) \
+            .is_("consumed_at", "null").order("created_at").execute()
+        if not res.data:
+            return []
+        ids = [r["id"] for r in res.data]
+        await (await self._t("call_commands")).update({"consumed_at": utcnow().isoformat()}) \
+            .in_("id", ids).execute()
+        return [{"type": r["type"], "payload": r.get("payload") or {}} for r in res.data]
 
     async def save_approval(self, approval):
         row = _j(approval)

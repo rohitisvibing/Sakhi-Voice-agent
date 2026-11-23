@@ -15,6 +15,7 @@ from app.models.mission import ApprovalKind, MissionSpec, PreparationBrief
 from app.models.principal import Disclosure, PrincipalProfile
 from app.models.transcript import EventKind, Speaker, TranscriptEvent
 from app.providers.llm.base import LLMProvider, Message
+from app.realtime import dtmf
 
 from . import prompts
 from .context_manager import state_context, turn_context_parts
@@ -68,6 +69,7 @@ class TurnInputs:
     is_opening: bool = False
     commitment_approved: bool = False
     allow_hold: bool = False
+    phone: bool = False  # a phone call: the keypad is available for automated menus
 
 
 @dataclass
@@ -109,18 +111,39 @@ async def plan_turn(llm: LLMProvider, inputs: TurnInputs) -> TurnDecision:
     directive = inputs.directive
     plan: TurnPlan | None = None
     guard: GuardResult | None = None
-    for attempt in range(2):
+    budget, keys_redone = 2, False
+    while budget > 0:
+        budget -= 1
         static, dynamic = turn_context_parts(
             spec=inputs.spec, brief=inputs.brief, profile=inputs.profile,
             negotiation=inputs.negotiation, events=inputs.events,
             new_instructions=inputs.new_instructions,
             standing_instructions=inputs.standing_instructions,
-            approved_disclosures=inputs.approved_disclosures, extra_directive=directive)
+            approved_disclosures=inputs.approved_disclosures, extra_directive=directive,
+            phone=inputs.phone)
         say = await llm.complete_json(
             TurnSay, [Message("system", prompts.AGENT_TURN, cache=True),
                       Message("user", static, cache=True), Message("user", dynamic)],
             task="turn", role="live", max_tokens=1400)
         plan = TurnPlan.model_validate(say.model_dump())
+        plan.dtmf = dtmf.clean(plan.dtmf) if inputs.phone else None
+        if plan.dtmf and not keys_redone and not dtmf.sounds_like_menu(last_cp):
+            # Keys only answer a menu that just read out options; otherwise a person is there.
+            directive = ((inputs.directive + "\n") if inputs.directive else "") + (
+                "No menu options were just read out, so a person is on the line: talk to them "
+                "(introduce yourself if you haven't), and do not press keys.")
+            guard = GuardResult(Action.regenerate, plan=plan)
+            keys_redone, budget = True, budget + 1  # doesn't use up a safety redraft
+            continue
+        if plan.dtmf and not plan.needs_approval:
+            # Pressing keys in an automated menu: nothing is said, so there is nothing to check.
+            plan.hold, plan.response_text, plan.response_text_en = False, "", None
+            plan.offers_made, plan.accepts_offer = [], False
+            return TurnDecision(plan=plan, guard=GuardResult(Action.allow, plan=plan))
+        if plan.needs_approval and plan.needs_approval.kind == ApprovalKind.ivr_choice:
+            plan.response_text, plan.response_text_en = "", None  # menus aren't spoken to
+            return TurnDecision(plan=plan, guard=GuardResult(Action.allow, plan=plan),
+                                approval=plan.needs_approval)
         if plan.hold or not plan.response_text.strip():
             if inputs.allow_hold:
                 plan.hold, plan.response_text = True, ""

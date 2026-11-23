@@ -60,6 +60,19 @@ class Settings(BaseSettings):
     plan_price_inr: int = 499
     monthly_talk_minutes: int = 180  # never shown in the UI
     trial_talk_minutes: int = 3      # the free mission's hidden cap, across its calls
+    # Phone calls (Exotel). Off when the keys are unset. Never sent to the browser.
+    exotel_sid: str = ""
+    exotel_api_key: str = ""
+    exotel_api_token: str = ""
+    exotel_subdomain: str = "api.exotel.com"  # api.in.exotel.com for Mumbai-region accounts
+    exotel_caller_id: str = ""  # your ExoPhone
+    telephony_secret: str = ""  # signs the stream and status-callback URLs given to Exotel
+    public_base_url: str = "https://www.sakhi.buzz"
+    # Calls run inside one Vercel function (300 s cap): Sakhi wraps up before it.
+    exotel_simulate: bool = False  # local testing: no real call, scripts/exotel_sim.py answers
+    phone_call_limit_seconds: int = 240
+    phone_ring_timeout_s: int = 40
+    ivr_pause_ms: int = 500
     text_pacing: bool = True  # text-only mode waits ~reading time between turns
     # Practice mode: compute the next line while the current one is still being spoken.
     speculate: bool = True
@@ -86,6 +99,15 @@ class Settings(BaseSettings):
     @property
     def billing_configured(self) -> bool:
         return bool(self.razorpay_key_id and self.razorpay_key_secret and self.razorpay_plan_id)
+
+    @property
+    def exotel_configured(self) -> bool:
+        return bool(self.exotel_sid and self.exotel_api_key and self.exotel_api_token
+                    and self.exotel_caller_id and self.telephony_secret)
+
+    @property
+    def phone_available(self) -> bool:
+        return bool(self.telephony_secret) and (self.exotel_configured or self.exotel_simulate)
 
     @property
     def db_configured(self) -> bool:

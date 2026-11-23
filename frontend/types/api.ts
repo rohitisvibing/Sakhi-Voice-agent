@@ -23,7 +23,8 @@ export type ApprovalKind =
   | "info_disclosure"
   | "negotiation_authority"
   | "financial"
-  | "final_commitment";
+  | "final_commitment"
+  | "ivr_choice";
 
 export interface Quantity {
   name: string;
@@ -145,9 +146,27 @@ export interface NegotiationState {
   approval_required: boolean;
   objective_met: boolean;
   summary: string;
+  ivr_path?: string[];
 }
 
-export type ConversationMode = "simulated" | "live";
+export type ConversationMode = "simulated" | "live" | "phone";
+
+export type CallStatus =
+  | "preparing"
+  | "initiating"
+  | "ringing"
+  | "connected"
+  | "in_conversation"
+  | "navigating_ivr"
+  | "completed"
+  | "failed"
+  | "busy"
+  | "no_answer";
+
+export interface Recipient {
+  name: string;
+  phone: string;
+}
 
 export interface Conversation {
   id: string;
@@ -159,6 +178,10 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   ended_at: string | null;
+  recipient_name?: string | null;
+  recipient_phone?: string | null;
+  call_sid?: string | null;
+  call_status?: CallStatus | null;
 }
 
 export type Speaker = "agent" | "counterparty" | "user" | "system";
@@ -227,6 +250,8 @@ export interface OutcomeReport {
   commitments: string[];
   excerpts: { speaker: string; text: string }[];
   next_steps: string[];
+  key_information?: string[];
+  call?: { recipient_name: string | null; recipient_phone: string | null; duration_seconds: number; ivr_path: string[] } | null;
   created_at: string;
 }
 
@@ -248,6 +273,7 @@ export interface Health {
   llm: { provider: string; configured: boolean; model: string };
   speech: { provider: string; configured: boolean; tts_model: string; stt_model: string };
   database: { provider: string; configured: boolean };
+  phone?: { configured: boolean };
 }
 
 export interface AppErrorPayload {

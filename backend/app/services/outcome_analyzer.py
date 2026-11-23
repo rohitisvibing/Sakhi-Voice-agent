@@ -79,6 +79,7 @@ async def analyze(llm: LLMProvider, conversation_id: str, spec: MissionSpec,
         commitments=draft.commitments or negotiation.commitments,
         excerpts=draft.excerpts,
         next_steps=draft.next_steps,
+        key_information=draft.key_information,
     )
 
 

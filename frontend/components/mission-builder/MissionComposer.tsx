@@ -4,12 +4,13 @@ import { useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowUp, SlidersHorizontal } from "lucide-react";
+import { ArrowUp, Loader2, Mic, SlidersHorizontal, Square } from "lucide-react";
 import { api } from "@/services/api";
 import { ErrorNote } from "@/components/shell/ErrorNote";
 import { AgentOrb } from "@/components/orb/AgentOrb";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
+import { useDictation } from "@/hooks/useDictation";
 
 const LANGS = ["English", "Kannada", "Hindi", "Tamil", "Telugu", "Malayalam", "Marathi", "Bengali"];
 
@@ -28,6 +29,16 @@ export function MissionComposer({ greeting }: { greeting?: string }) {
   const [tone, setTone] = useState("");
   const [languages, setLanguages] = useState<string[]>([]);
   const area = useRef<HTMLTextAreaElement>(null);
+  const dictation = useDictation((heard) => {
+    setText((cur) => (cur.trim() ? `${cur.trimEnd()} ${heard}` : heard));
+    requestAnimationFrame(() => {
+      const el = area.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  });
+  const listening = dictation.status === "recording";
 
   const template = templates.data?.find((x) => x.id === templateId);
   const [appliedTemplate, setAppliedTemplate] = useState<string | null>(null);
@@ -48,7 +59,7 @@ export function MissionComposer({ greeting }: { greeting?: string }) {
     onSuccess: (m) => router.push(`/missions/${m.id}/review`),
   });
 
-  const ready = text.trim().length >= 8 && !extract.isPending;
+  const ready = text.trim().length >= 8 && !extract.isPending && dictation.status === "idle";
 
   return (
     <section aria-label="New mission" className="pt-6 sm:pt-14">
@@ -90,11 +101,20 @@ export function MissionComposer({ greeting }: { greeting?: string }) {
             placeholder="Get my rent down from ₹35,000 to ₹30,000. Never above ₹32,000 without asking me. Kannada if he prefers."
             className="block min-h-36 w-full resize-none bg-transparent px-5 pt-5 text-lead leading-relaxed text-ink placeholder:text-ink-3 focus:outline-none sm:min-h-40"
             disabled={extract.isPending}
+            readOnly={listening}
           />
-          <div className="flex items-center justify-between px-2.5 pb-2.5">
-            <IconButton label="Who, tone and language" icon={SlidersHorizontal} size="sm" active={more} onClick={() => setMore((v) => !v)} />
+          <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
+            <div className="flex min-w-0 items-center gap-1">
+              <IconButton label="Who, tone and language" icon={SlidersHorizontal} size="sm" active={more} onClick={() => setMore((v) => !v)} />
+              <DictateButton dictation={dictation} disabled={extract.isPending} />
+            </div>
             <IconButton label="Build mission" icon={ArrowUp} type="submit" tone="accent" disabled={!ready} />
           </div>
+          {dictation.error && (
+            <p role="alert" className="px-5 pb-3 text-meta text-error">
+              {dictation.error}
+            </p>
+          )}
           <AnimatePresence initial={false}>
             {more && (
               <motion.div
@@ -178,4 +198,37 @@ export function MissionComposer({ greeting }: { greeting?: string }) {
       </AnimatePresence>
     </section>
   );
+}
+
+function DictateButton({ dictation, disabled }: { dictation: ReturnType<typeof useDictation>; disabled?: boolean }) {
+  const { status, seconds, maxSeconds, start, stop } = dictation;
+  if (status === "transcribing") {
+    return (
+      <span className="flex h-9 items-center gap-2 px-2 text-meta text-ink-2" aria-live="polite">
+        <Loader2 className="size-4 animate-spin text-aurora" aria-hidden />
+        Writing it down…
+      </span>
+    );
+  }
+  if (status === "recording") {
+    return (
+      <button
+        type="button"
+        onClick={() => void stop()}
+        aria-label="Stop recording"
+        className="flex h-9 items-center gap-2 rounded-full bg-aurora-soft pl-2 pr-3 text-meta text-ink ring-1 ring-aurora/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-aurora"
+      >
+        <span className="relative grid size-5 place-items-center">
+          <span aria-hidden className="absolute inset-0 animate-ping rounded-full bg-aurora/40 motion-reduce:animate-none" />
+          <Square className="relative size-2.5 fill-aurora text-aurora" aria-hidden />
+        </span>
+        <span aria-live="polite">Listening… tap to stop</span>
+        <span className="tabular text-ink-3">
+          0:{String(seconds).padStart(2, "0")}
+          <span className="sr-only"> of {maxSeconds} seconds</span>
+        </span>
+      </button>
+    );
+  }
+  return <IconButton label="Speak your request" icon={Mic} size="sm" disabled={disabled} onClick={() => void start()} />;
 }

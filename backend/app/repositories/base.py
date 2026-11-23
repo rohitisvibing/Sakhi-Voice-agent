@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 
 from app.models.billing import Subscription
-from app.models.conversation import Approval, Conversation
+from app.models.conversation import Approval, Conversation, Recipient
 from app.models.mission import AgentTemplate, Mission
 from app.models.principal import PrincipalProfile
 from app.models.report import OutcomeReport
@@ -48,6 +48,22 @@ class Repository(ABC):
     async def list_events(self, conversation_id: str) -> list[TranscriptEvent]: ...
     @abstractmethod
     async def update_event_meta(self, event_id: str, meta: dict) -> None: ...
+    @abstractmethod
+    async def list_events_since(self, conversation_id: str, since: datetime | None
+                                ) -> list[TranscriptEvent]:
+        """Events after `since` (all when None), oldest first."""
+
+    # phone calls -----------------------------------------------------------------------
+    @abstractmethod
+    async def find_conversation_by_call(self, call_sid: str) -> Conversation | None: ...
+    @abstractmethod
+    async def recent_recipients(self, principal_id: str, limit: int = 20) -> list[Recipient]:
+        """People this principal has phoned, most recent first, one entry per number."""
+    @abstractmethod
+    async def add_call_command(self, conversation_id: str, type: str, payload: dict) -> None: ...
+    @abstractmethod
+    async def take_call_commands(self, conversation_id: str) -> list[dict]:
+        """Pending commands for a call, oldest first; each is returned once."""
 
     @abstractmethod
     async def save_approval(self, approval: Approval) -> None: ...

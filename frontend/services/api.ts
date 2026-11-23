@@ -12,6 +12,7 @@ import type {
   MissionSummary,
   OutcomeReport,
   PrincipalProfile,
+  Recipient,
 } from "@/types/api";
 import { accessToken, supabase } from "@/lib/supabase";
 import { openPaywall } from "@/lib/paywall";
@@ -47,7 +48,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     res = await fetch(API_URL + path, {
       ...init,
       headers: {
-        "Content-Type": "application/json",
+        ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(init?.headers ?? {}),
       },
@@ -93,6 +94,11 @@ export const api = {
   saveProfile: (p: Partial<PrincipalProfile>) =>
     request<PrincipalProfile>("/api/profile", { method: "PUT", body: json(p) }),
   templates: () => request<AgentTemplate[]>("/api/templates"),
+  transcribe: (wav: Blob) => {
+    const form = new FormData();
+    form.append("audio", wav, "request.wav");
+    return request<{ text: string; language: string | null }>("/api/transcribe", { method: "POST", body: form });
+  },
   missions: () => request<MissionSummary[]>("/api/missions"),
   mission: (id: string) => request<Mission>(`/api/missions/${id}`),
   extract: (body: { text: string; counterparty_type?: string; languages?: string[]; tone?: string; template_id?: string }) =>
@@ -104,11 +110,13 @@ export const api = {
   approve: (id: string) => request<Mission>(`/api/missions/${id}/approve`, { method: "POST" }),
   prepare: (id: string) => request<Mission>(`/api/missions/${id}/prepare`, { method: "POST" }),
   deleteMission: (id: string) => request<void>(`/api/missions/${id}`, { method: "DELETE" }),
-  createConversation: (mission_id: string, mode: ConversationMode, voice_enabled = true) =>
+  createConversation: (mission_id: string, mode: ConversationMode, voice_enabled = true, recipient?: Recipient) =>
     request<Conversation>("/api/conversations", {
       method: "POST",
-      body: json({ mission_id, mode, voice_enabled }),
+      body: json({ mission_id, mode, voice_enabled, recipient }),
     }),
+  dial: (id: string) => request<Conversation>(`/api/conversations/${id}/dial`, { method: "POST", body: json({ confirm: true }) }),
+  recentRecipients: () => request<Recipient[]>("/api/recipients/recent"),
   conversation: (id: string) => request<ConversationDetail>(`/api/conversations/${id}`),
   report: (id: string) => request<OutcomeReport>(`/api/conversations/${id}/report`),
 };

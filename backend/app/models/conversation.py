@@ -1,9 +1,10 @@
 """Conversation state machine and the structured negotiation state the engine maintains."""
 
+import re
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from .common import Schema, new_id, utcnow
 from .mission import ApprovalKind
@@ -60,6 +61,62 @@ def is_live(state: ConversationState) -> bool:
 class ConversationMode(StrEnum):
     simulated = "simulated"   # LLM role-plays the counterparty
     live = "live"             # a real person speaks through the browser microphone
+    phone = "phone"           # Sakhi places a phone call (Exotel) and talks to the callee
+
+
+class CallStatus(StrEnum):
+    """Where a phone call is, as the principal sees it."""
+
+    preparing = "preparing"
+    initiating = "initiating"
+    ringing = "ringing"
+    connected = "connected"
+    in_conversation = "in_conversation"
+    navigating_ivr = "navigating_ivr"
+    completed = "completed"
+    failed = "failed"
+    busy = "busy"
+    no_answer = "no_answer"
+
+
+CALL_ACTIVE = {CallStatus.initiating, CallStatus.ringing, CallStatus.connected,
+               CallStatus.in_conversation, CallStatus.navigating_ivr}
+CALL_ENDED = {CallStatus.completed, CallStatus.failed, CallStatus.busy, CallStatus.no_answer}
+
+
+def normalize_phone(raw: str, default_country: str = "91") -> str:
+    """E.164 (+919876543210) from what people type: spaces, dashes, a leading 0 or 91."""
+    digits = re.sub(r"[^\d+]", "", raw or "")
+    if digits.startswith("+"):
+        num = "+" + re.sub(r"\D", "", digits[1:])
+    else:
+        d = re.sub(r"\D", "", digits).lstrip("0")
+        if len(d) == 10:
+            num = f"+{default_country}{d}"
+        elif len(d) == 12 and d.startswith(default_country):
+            num = f"+{d}"
+        else:
+            num = f"+{d}"
+    if not re.fullmatch(r"\+\d{8,15}", num):
+        raise ValueError("Enter a full phone number, like 98765 43210.")
+    if num.startswith("+91") and not re.fullmatch(r"\+91[6-9]\d{9}", num):
+        raise ValueError("Indian mobile numbers have 10 digits and start with 6-9.")
+    return num
+
+
+class Recipient(Schema):
+    name: str = Field(min_length=1, max_length=80)
+    phone: str
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: str) -> str:
+        return normalize_phone(v)
 
 
 class Offer(Schema):
@@ -83,6 +140,8 @@ class NegotiationState(Schema):
     next_action: str | None = None
     approval_required: bool = False
     objective_met: bool = False
+    ivr_path: list[str] = Field(default_factory=list,
+                                description="Keys pressed in phone menus, e.g. '2: Billing'")
     summary: str = ""
 
 
@@ -123,6 +182,11 @@ class Conversation(Schema):
     negotiation: NegotiationState = Field(default_factory=NegotiationState)
     voice_enabled: bool = True
     talk_seconds: int = 0  # metered while the call is live (billing)
+    # Phone mode only (Exotel): who is called, and where the call is.
+    recipient_name: str | None = None
+    recipient_phone: str | None = None
+    call_sid: str | None = None
+    call_status: CallStatus | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     ended_at: datetime | None = None
@@ -132,3 +196,4 @@ class CreateConversation(Schema):
     mission_id: str
     mode: ConversationMode = ConversationMode.simulated
     voice_enabled: bool = True
+    recipient: Recipient | None = None  # required for phone mode

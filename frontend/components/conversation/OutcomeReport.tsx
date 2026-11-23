@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, ChevronDown, X } from "lucide-react";
+import { Check, ChevronDown, Phone, X } from "lucide-react";
 import { api, ApiError } from "@/services/api";
 import type { Offer } from "@/types/api";
 import { money } from "@/lib/format";
@@ -14,6 +14,12 @@ import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/shell/ErrorNote";
 import { DealLine, dealFrom } from "@/components/viz/DealLine";
 import { cn } from "@/lib/utils";
+import { formatPhone } from "@/lib/phone";
+
+function duration(s: number) {
+  const m = Math.floor(s / 60);
+  return m ? `${m} min ${s % 60} s` : `${s} s`;
+}
 
 function List({ title, items, tone }: { title: string; items: string[]; tone?: string }) {
   if (!items.length) return null;
@@ -86,6 +92,16 @@ export function OutcomeReportView({ id }: { id: string }) {
     <div className="pt-4 sm:pt-10">
       <AmbientGlow state={met ? "completed" : "paused"} />
       <p className="text-meta text-ink-3">{mission?.spec.title ?? ""}</p>
+      {r.call && (
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 text-meta text-ink-2">
+          <Phone className="size-3.5" aria-hidden />
+          <span>
+            Call with <span className="text-ink">{r.call.recipient_name ?? "them"}</span>
+          </span>
+          <span className="tabular text-ink-3">{formatPhone(r.call.recipient_phone)}</span>
+          <span className="tabular text-ink-3">{duration(r.call.duration_seconds)}</span>
+        </p>
+      )}
       <div className="mt-1 flex items-center gap-3">
         <h1 className={cn("font-serif text-[4rem] leading-none sm:text-[5rem]", met ? "text-success" : "text-ink")}>{met ? "Met" : "Not met"}</h1>
         <div className="size-16 shrink-0 sm:size-20">
@@ -116,6 +132,15 @@ export function OutcomeReportView({ id }: { id: string }) {
         </ul>
       )}
 
+      {r.call && (
+        <div className="mt-10 space-y-7">
+          <List title="What Sakhi found out" items={r.key_information ?? []} />
+          <List title="Agreed" items={r.agreements} tone="text-success" />
+          <List title="Follow up" items={r.next_steps} />
+          {r.call.ivr_path.length > 0 && <List title="Phone menu choices" items={r.call.ivr_path.map((x) => `Pressed ${x}`)} />}
+        </div>
+      )}
+
       <button
         type="button"
         aria-expanded={details}
@@ -132,7 +157,8 @@ export function OutcomeReportView({ id }: { id: string }) {
               {rest && <p className="max-w-[65ch] text-body text-ink">{rest}</p>}
               <p className="max-w-[65ch] text-body text-ink-2">{r.achievement_rationale}</p>
               <Offers made={r.offers_made} received={r.offers_received} />
-              <List title="Agreed" items={r.agreements} tone="text-success" />
+              {!r.call && <List title="Agreed" items={r.agreements} tone="text-success" />}
+              {!r.call && <List title="What they told us" items={r.key_information ?? []} />}
               <List title="Committed for you" items={r.commitments} />
               <List title="Still open" items={r.unresolved_issues} />
               {r.excerpts.length > 0 && (
@@ -151,7 +177,7 @@ export function OutcomeReportView({ id }: { id: string }) {
                   </ul>
                 </section>
               )}
-              <List title="Next" items={r.next_steps} />
+              {!r.call && <List title="Next" items={r.next_steps} />}
             </div>
           </motion.div>
         )}

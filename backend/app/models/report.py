@@ -27,6 +27,15 @@ class CriterionResult(Schema):
     evidence: str
 
 
+class CallSummary(Schema):
+    """Phone calls: who was called and for how long."""
+
+    recipient_name: str | None = None
+    recipient_phone: str | None = None
+    duration_seconds: int = 0
+    ivr_path: list[str] = Field(default_factory=list)
+
+
 class OutcomeReport(Schema):
     conversation_id: str
     objective: str
@@ -42,6 +51,8 @@ class OutcomeReport(Schema):
     commitments: list[str] = Field(default_factory=list)
     excerpts: list[Excerpt] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)
+    key_information: list[str] = Field(default_factory=list)
+    call: CallSummary | None = None
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -57,3 +68,7 @@ class ReportDraft(Schema):
     commitments: list[str] = Field(default_factory=list)
     excerpts: list[Excerpt] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)
+    key_information: list[str] = Field(
+        default_factory=list,
+        description="Important facts learned from the other side (dates, names, reference "
+                    "numbers, conditions, prices)")

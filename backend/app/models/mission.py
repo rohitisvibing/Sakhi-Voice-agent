@@ -14,6 +14,7 @@ class ApprovalKind(StrEnum):
     negotiation_authority = "negotiation_authority"  # going beyond the agreed negotiation range
     financial = "financial"                        # any financial commitment
     final_commitment = "final_commitment"          # accepting a final deal / binding agreement
+    ivr_choice = "ivr_choice"                      # which key to press in a phone menu
 
 
 class Quantity(Schema):

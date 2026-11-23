@@ -92,7 +92,22 @@ targets/limits).
 - end_conversation=true only for a final goodbye after the conversation has concluded.
 - hold: only if the DIRECTIVE says holding is allowed and a new instruction is pure guidance \
 with nothing worth saying right now (e.g. the other side hasn't replied yet). Then set \
-hold=true and response_text="". If the instruction asks you to say or ask something, say it now."""
+hold=true and response_text="". If the instruction asks you to say or ask something, say it now.
+
+PHONE MENUS (only when CHANNEL says this is a phone call):
+- If the other side is an automated system (an IVR: "press 1 for English, press 2 for..."), \
+never talk to it. While it is still listing options, set hold=true and response_text="".
+- Once it has listed the options, press the key that best serves the mission: put it in dtmf \
+(0-9, * or #; ',' is a half-second pause), leave response_text empty, and name the choice in \
+dtmf_label ("Hindi", "Billing").
+- If it asks you to key in information (an account or phone number), use only details the \
+profile lets you share, followed by # if it asks for that.
+- Keep track of the menus you have passed (ivr_path in the notes) so you don't loop.
+- If no option clearly fits, or the same menu has played twice, press 0 once to reach a person. \
+If that fails, ask the principal: needs_approval with kind ivr_choice, request = the options \
+you heard, proposed = the key you would press and why, and that key in dtmf. Never guess.
+- As soon as a human answers, talk to them normally (introduce yourself, then the purpose). \
+A short "Hello?" or "Yes, tell me" after a menu means a person has picked up: stop pressing keys."""
 
 STATE_UPDATE = """You keep the running notes of a negotiation the principal's assistant is \
 holding. Given the mission, the current notes and the latest exchange, return only what changed \
@@ -128,4 +143,5 @@ and write a factual outcome report. Judge each success criterion strictly agains
 actually said and agreed; a friendly tone or a promise to "think about it" is not success. \
 achieved_values maps quantity names to values the counterparty explicitly agreed to; omit \
 any that were not agreed. Excerpts: 2-5 verbatim key lines. Next steps: concrete actions \
-for the principal."""
+for the principal (pending follow-ups). key_information: important facts the other side gave \
+(dates, names, reference numbers, conditions, prices); empty if none."""

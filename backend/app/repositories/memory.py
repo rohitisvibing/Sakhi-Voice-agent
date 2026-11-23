@@ -2,7 +2,7 @@
 
 from app.models.billing import Subscription
 from app.models.common import utcnow
-from app.models.conversation import Approval, Conversation
+from app.models.conversation import Approval, Conversation, Recipient
 from app.models.mission import AgentTemplate, Mission
 from app.models.principal import PrincipalProfile
 from app.models.report import OutcomeReport
@@ -27,6 +27,7 @@ class MemoryRepository(Repository):
         self.templates = list(DEFAULT_TEMPLATES)
         self.trials: dict[str, str] = {}
         self.subscriptions: dict[str, Subscription] = {}
+        self.call_commands: dict[str, list[dict]] = {}
 
     async def get_profile(self, principal_id):
         p = self.profiles.get(principal_id)
@@ -86,6 +87,33 @@ class MemoryRepository(Repository):
 
     async def list_events(self, conversation_id):
         return list(self.events.get(conversation_id, []))
+
+    async def list_events_since(self, conversation_id, since):
+        return [e for e in self.events.get(conversation_id, []) if since is None or e.ts > since]
+
+    async def find_conversation_by_call(self, call_sid):
+        c = next((c for c in self.conversations.values() if c.call_sid == call_sid), None)
+        return c.model_copy(deep=True) if c else None
+
+    async def recent_recipients(self, principal_id, limit=20):
+        mine = {m.id for m in self.missions.values() if m.principal_id == principal_id}
+        calls = sorted((c for c in self.conversations.values()
+                        if c.mission_id in mine and c.recipient_phone),
+                       key=lambda c: c.created_at, reverse=True)
+        seen, out = set(), []
+        for c in calls:
+            if c.recipient_phone not in seen:
+                seen.add(c.recipient_phone)
+                out.append(Recipient(name=c.recipient_name or c.recipient_phone,
+                                     phone=c.recipient_phone))
+        return out[:limit]
+
+    async def add_call_command(self, conversation_id, type, payload):
+        self.call_commands.setdefault(conversation_id, []).append(
+            {"type": type, "payload": payload})
+
+    async def take_call_commands(self, conversation_id):
+        return self.call_commands.pop(conversation_id, [])
 
     async def save_approval(self, approval):
         self.approvals.setdefault(approval.conversation_id, {})[approval.id] = approval

@@ -10,6 +10,7 @@ from app.providers.llm.demo import DemoLLM
 from app.providers.llm.openrouter import OpenRouterProvider
 from app.providers.stt.base import STTProvider
 from app.providers.stt.sarvam import SarvamSTT
+from app.providers.telephony.exotel import Exotel, LocalExotel
 from app.providers.translate.base import TranslationProvider
 from app.providers.translate.sarvam import SarvamTranslator
 from app.providers.tts.base import TTSProvider
@@ -19,6 +20,7 @@ from app.repositories.memory import MemoryRepository
 from app.repositories.supabase_repo import SupabaseRepository
 
 log = logging.getLogger(__name__)
+PHONE_SAMPLE_RATE = 16000  # Exotel streams at 16 kHz when asked (?sample-rate=16000)
 
 
 @dataclass
@@ -30,6 +32,8 @@ class Container:
     repo: Repository
     translator: TranslationProvider | None = None
     payments: Any = None  # a Razorpay client; tests swap in a fake
+    telephony: Any = None  # an Exotel client; tests swap in a fake
+    phone_tts: TTSProvider | None = None  # TTS rendered at the phone line's sample rate
 
     @property
     def demo(self) -> bool:
@@ -52,8 +56,15 @@ def build_container(settings: Settings | None = None) -> Container:
                     "on restart).")
         repo = MemoryRepository(seed_principal_id=s.default_principal_id)
     llm = DemoLLM() if use_demo else OpenRouterProvider(s)
+    telephony: Any = None
+    if s.exotel_simulate:
+        telephony = LocalExotel()
+    elif s.exotel_configured:
+        telephony = Exotel(s)
+    phone_tts = SarvamTTS(s.model_copy(update={"sarvam_tts_sample_rate": PHONE_SAMPLE_RATE}))
     return Container(settings=s, llm=llm, stt=SarvamSTT(s), tts=SarvamTTS(s), repo=repo,
-                     translator=SarvamTranslator(s, fallback=llm))
+                     translator=SarvamTranslator(s, fallback=llm), phone_tts=phone_tts,
+                     telephony=telephony)
 
 
 _container: Container | None = None

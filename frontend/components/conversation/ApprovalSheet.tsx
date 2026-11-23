@@ -22,6 +22,7 @@ export function ApprovalSheet({
   const [alt, setAlt] = useState("");
   const [writing, setWriting] = useState(false);
   if (!approval) return null;
+  const menu = approval.kind === "ivr_choice";
   const decide = (d: "approved" | "rejected" | "alternative", text?: string) => {
     onDecide(d, text);
     setAlt("");
@@ -41,13 +42,13 @@ export function ApprovalSheet({
         <div className="space-y-3">
           {approval.request && (
             <p className="border-r-2 border-ember/70 pr-3.5 text-right text-lead text-ember">
-              <span className="sr-only">They said: </span>
+              <span className={menu ? "mb-1 block text-meta text-ink-3" : "sr-only"}>{menu ? "The menu offered" : "They said: "}</span>
               {approval.request}
               {approval.request_en && <span lang="en" className="mt-1 block text-body text-ink-2">{approval.request_en}</span>}
             </p>
           )}
           <p className="border-l-2 border-aurora/70 pl-3.5 text-lead text-ink">
-            <span className="sr-only">The agent wants to say: </span>
+            <span className="sr-only">{menu ? "Sakhi would choose: " : "The agent wants to say: "}</span>
             {approval.proposed}
             {approval.proposed_en && <span lang="en" className="mt-1 block text-body text-ink-2">{approval.proposed_en}</span>}
           </p>
@@ -57,7 +58,7 @@ export function ApprovalSheet({
         {writing ? (
           <div className="space-y-3">
             <label htmlFor="alt" className="sr-only">
-              What should the agent say instead?
+              {menu ? "Which option should Sakhi choose?" : "What should the agent say instead?"}
             </label>
             <textarea
               id="alt"
@@ -65,11 +66,11 @@ export function ApprovalSheet({
               value={alt}
               onChange={(e) => setAlt(e.target.value)}
               className="min-h-24 w-full resize-none rounded-2xl bg-bg/60 px-4 py-3 text-body text-ink ring-1 ring-line placeholder:text-ink-3 focus:outline-none focus:ring-aurora/50"
-              placeholder="Offer ₹31,000 if maintenance is included."
+              placeholder={menu ? "Press 3 for accounts." : "Offer ₹31,000 if maintenance is included."}
             />
             <div className="flex gap-2">
               <Button className="h-12 flex-1 rounded-full" disabled={!alt.trim()} onClick={() => decide("alternative", alt.trim())}>
-                Say this instead
+                {menu ? "Choose this" : "Say this instead"}
               </Button>
               <Button variant="ghost" className="h-12 rounded-full" onClick={() => setWriting(false)}>
                 Back
@@ -84,7 +85,7 @@ export function ApprovalSheet({
             <Button variant="secondary" className="h-12 flex-1 rounded-full" onClick={() => decide("rejected")}>
               Decline
             </Button>
-            <IconButton label="Say something else" icon={PenLine} className="size-12" onClick={() => setWriting(true)} />
+            <IconButton label={menu ? "Choose something else" : "Say something else"} icon={PenLine} className="size-12" onClick={() => setWriting(true)} />
           </div>
         )}
       </SheetContent>

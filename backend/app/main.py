@@ -7,10 +7,19 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import approvals, billing, conversations, missions, profiles
+from app.api import (
+    approvals,
+    billing,
+    conversations,
+    missions,
+    profiles,
+    telephony,
+    transcribe,
+)
 from app.core.auth import router as auth_router
 from app.core.deps import get_container
 from app.core.errors import AppError
+from app.realtime import telephony as telephony_stream
 from app.realtime import websocket_manager
 from app.realtime.session_manager import manager
 
@@ -49,6 +58,7 @@ async def health() -> dict:
                    "tts_model": c.settings.sarvam_tts_model,
                    "stt_model": c.settings.sarvam_stt_model},
         "database": {"provider": c.repo.name, "configured": c.settings.db_configured},
+        "phone": {"configured": c.settings.phone_available and c.telephony is not None},
     }
 
 
@@ -58,4 +68,7 @@ app.include_router(missions.router)
 app.include_router(conversations.router)
 app.include_router(approvals.router)
 app.include_router(billing.router)
+app.include_router(transcribe.router)
+app.include_router(telephony.router)
 app.include_router(websocket_manager.router)
+app.include_router(telephony_stream.router)

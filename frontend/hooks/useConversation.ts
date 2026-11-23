@@ -12,6 +12,7 @@ import { openPaywall } from "@/lib/paywall";
 import type {
   AppErrorPayload,
   Approval,
+  CallStatus,
   Conversation,
   ConversationState,
   MissionSpec,
@@ -108,6 +109,8 @@ function reducer(s: ConversationView, action: Action): ConversationView {
     case "state":
       return {
         ...s,
+        conversation:
+          s.conversation && "call_status" in m ? { ...s.conversation, call_status: m.call_status as CallStatus | null } : s.conversation,
         state: m.state as ConversationState,
         paused: Boolean(m.paused),
         takeover: Boolean(m.takeover),

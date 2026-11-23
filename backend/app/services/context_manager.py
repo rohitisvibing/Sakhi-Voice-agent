@@ -86,6 +86,7 @@ def turn_context_parts(
     standing_instructions: list[str],
     approved_disclosures: dict[str, str] | None = None,
     extra_directive: str | None = None,
+    phone: bool = False,
 ) -> tuple[str, str]:
     """The user message for one agent turn, as (stable prefix, what changes each turn).
 
@@ -110,6 +111,9 @@ def turn_context_parts(
     if new_instructions:
         parts.append("NEW FROM THE PRINCIPAL SINCE YOUR LAST LINE (highest priority, act on "
                      "these now):\n- " + "\n- ".join(new_instructions))
+    if phone:
+        parts.append("CHANNEL: a phone call. The keypad is available for automated menus "
+                     "(see PHONE MENUS).")
     parts.append("RECENT TRANSCRIPT:\n" + transcript_context(events))
     if extra_directive:
         parts.append("DIRECTIVE FOR THIS TURN:\n" + extra_directive)

@@ -13,8 +13,10 @@ import {
   Mic,
   MicOff,
   Pause,
+  Phone,
   PhoneOff,
   Play,
+  RotateCcw,
   Square,
   UserRoundCheck,
   X,
@@ -24,7 +26,9 @@ import { useAudioEngine } from "@/hooks/useAudioEngine";
 import { useConversation } from "@/hooks/useConversation";
 import { useWakeLock } from "@/hooks/useWakeLock";
 import { useStoredFlag } from "@/hooks/useStoredFlag";
-import type { ConversationState, TranscriptEvent } from "@/types/api";
+import type { CallStatus, ConversationState, TranscriptEvent } from "@/types/api";
+import { api } from "@/services/api";
+import { formatPhone } from "@/lib/phone";
 import { makeProgress } from "@/hooks/useSpokenProgress";
 import { STATE_LABEL } from "@/lib/format";
 import { AgentOrb } from "@/components/orb/AgentOrb";
@@ -52,6 +56,73 @@ const DOT: Partial<Record<ConversationState, string>> = {
   idle: "bg-ink-3",
 };
 
+const CALL_LABEL: Record<CallStatus, string> = {
+  preparing: "Preparing",
+  initiating: "Dialling",
+  ringing: "Ringing",
+  connected: "Connected",
+  in_conversation: "In conversation",
+  navigating_ivr: "Navigating the menu",
+  completed: "Call ended",
+  failed: "Call failed",
+  busy: "Line busy",
+  no_answer: "No answer",
+};
+const CALL_TONE: Partial<Record<CallStatus, string>> = {
+  in_conversation: "text-success",
+  navigating_ivr: "text-aurora",
+  failed: "text-error",
+  busy: "text-warning",
+  no_answer: "text-warning",
+};
+const UNREACHED: CallStatus[] = ["failed", "busy", "no_answer"];
+
+function clock(s: number) {
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** Phone calls: who is on the line, where the call is, and for how long. */
+function CallHeader({
+  name,
+  phone,
+  status,
+  connectedAt,
+  endedAt,
+  objective,
+}: {
+  name: string;
+  phone: string;
+  status: CallStatus | null | undefined;
+  connectedAt: string | null;
+  endedAt: string | null;
+  objective?: string;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  const running = Boolean(connectedAt) && !endedAt;
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [running]);
+  const end = endedAt ? Date.parse(endedAt) : now;
+  const seconds = connectedAt ? Math.max(0, Math.floor((end - Date.parse(connectedAt)) / 1000)) : 0;
+  const s = status ?? "preparing";
+  return (
+    <div className="relative z-10 mx-auto w-full max-w-xl px-4 pb-1 text-center sm:px-6">
+      <p className="flex items-center justify-center gap-2 text-body text-ink">
+        <Phone className="size-4 text-ink-2" aria-hidden />
+        <span className="truncate font-medium">{name}</span>
+        <span className="shrink-0 text-meta text-ink-2 tabular">{formatPhone(phone)}</span>
+      </p>
+      <p className="mt-0.5 flex items-center justify-center gap-2 text-meta" role="status" aria-live="polite">
+        <span className={cn("text-ink-2", CALL_TONE[s])}>{CALL_LABEL[s]}</span>
+        {connectedAt && <span className="text-ink-3 tabular" aria-label={`Call time ${clock(seconds)}`}>{clock(seconds)}</span>}
+      </p>
+      {objective && <p className="mx-auto mt-1 line-clamp-1 max-w-md text-meta text-ink-3">{objective}</p>}
+    </div>
+  );
+}
+
 export function Workspace({ id }: { id: string }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -72,14 +143,32 @@ export function Workspace({ id }: { id: string }) {
 
   const { state, takeover, paused, muted } = view;
   const mode = view.conversation?.mode;
+  const phone = mode === "phone";
+  const callStatus = view.conversation?.call_status ?? null;
   const live = LIVE.includes(state);
   const finished = state === "completed" || state === "failed";
   const started = view.events.some((e) => e.kind === "speech");
-  const begun = started || !["ready", "idle"].includes(state);
+  // A phone call starts itself when they answer: there is no Start button to press.
+  const begun = phone || started || !["ready", "idle"].includes(state);
+  const unreached = phone && !finished && callStatus !== null && UNREACHED.includes(callStatus);
+  const connectedAt = phone ? (view.events.find((e) => e.speaker === "system" && e.text.startsWith("Connected to"))?.ts ?? null) : null;
+  const [redialing, setRedialing] = useState(false);
+  const redial = async () => {
+    setRedialing(true);
+    try {
+      await api.dial(id);
+    } finally {
+      setRedialing(false);
+    }
+  };
   const cpLabel = view.mission?.spec.counterparty.type
     ? view.mission.spec.counterparty.type.replace(/^\w/, (c) => c.toUpperCase())
     : "Them";
-  const pending = useMemo(() => view.approvals.find((a) => a.status === "pending") ?? null, [view.approvals]);
+  // Once the conversation is over, an unanswered approval no longer needs a decision.
+  const pending = useMemo(
+    () => (finished ? null : (view.approvals.find((a) => a.status === "pending") ?? null)),
+    [view.approvals, finished],
+  );
 
   useWakeLock(live);
 
@@ -93,14 +182,14 @@ export function Workspace({ id }: { id: string }) {
   // Background tabs on mobile lose audio: pause the agent and say so on return.
   useEffect(() => {
     const onVis = () => {
-      if (document.hidden && LIVE.includes(state)) {
+      if (document.hidden && LIVE.includes(state) && !phone) {
         audio.stopAll();
         if (send({ type: "pause" })) setBackgroundPaused(true);
       }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [state, send, audio]);
+  }, [state, send, audio, phone]);
 
   // Live mode: keep the microphone running while the conversation is active.
   const ensureMic = useCallback(async () => {
@@ -216,6 +305,12 @@ export function Workspace({ id }: { id: string }) {
   // Words under the orb only when you need to act or know something the orb can't show.
   const notice = takeover
     ? "You're speaking"
+    : phone && !connectedAt && !finished
+      ? callStatus === "ringing"
+        ? "Ringing…"
+        : unreached
+          ? CALL_LABEL[callStatus!]
+          : "Dialling…"
     : audio.micStatus === "denied"
       ? "Microphone blocked. Type what they say."
       : state === "awaiting_approval"
@@ -226,7 +321,7 @@ export function Workspace({ id }: { id: string }) {
             : "Paused"
           : null;
 
-  const detail = [takeover ? "You have control" : STATE_LABEL[state], mode === "simulated" ? "practice" : "live", !view.voice && view.hydrated && "text only", view.demo && "demo AI"]
+  const detail = [takeover ? "You have control" : STATE_LABEL[state], mode === "simulated" ? "practice" : phone ? "phone call" : "in person", !view.voice && view.hydrated && "text only", view.demo && "demo AI"]
     .filter(Boolean)
     .join(", ");
 
@@ -240,7 +335,7 @@ export function Workspace({ id }: { id: string }) {
       )}
       <IconButton label="Interrupt" icon={Square} onClick={interrupt} disabled={state !== "speaking"} />
       <IconButton label={takeover ? "Hand back" : "Take over"} icon={takeover ? UserRoundCheck : Hand} active={takeover} onClick={toggleTakeover} />
-      <IconButton label="End" icon={PhoneOff} tone="danger" onClick={end} />
+      <IconButton label={phone ? "End call" : "End"} icon={PhoneOff} tone="danger" onClick={end} disabled={unreached} />
     </div>
   );
 
@@ -278,6 +373,17 @@ export function Workspace({ id }: { id: string }) {
         <IconButton label="Mission" icon={ListChecks} size="sm" className="lg:hidden" onClick={() => setStateOpen(true)} />
       </header>
 
+      {phone && view.conversation?.recipient_phone && (
+        <CallHeader
+          name={view.conversation.recipient_name ?? "Call"}
+          phone={view.conversation.recipient_phone}
+          status={callStatus}
+          connectedAt={connectedAt}
+          endedAt={view.conversation.ended_at ?? (finished ? new Date().toISOString() : null)}
+          objective={spec?.objective}
+        />
+      )}
+
       {/* Body */}
       <div className="relative z-10 grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[17rem_minmax(0,1fr)_minmax(0,28rem)] lg:grid-rows-1">
         <aside className="hidden overflow-y-auto px-6 py-4 lg:block" aria-label="Mission">
@@ -302,7 +408,7 @@ export function Workspace({ id }: { id: string }) {
             {notice}
           </p>
           {deal && (deal.offers.length > 0 || !started) && <DealLine deal={deal} className="mt-2 w-full max-w-sm lg:mt-6" />}
-          <div className="mt-6 hidden lg:block">{!finished && begun && controls}</div>
+          <div className="mt-6 hidden lg:block">{!finished && begun && !unreached && controls}</div>
         </section>
 
         {/* Transcript + input */}
@@ -316,7 +422,7 @@ export function Workspace({ id }: { id: string }) {
             english={english}
             className={cn("flex-1 px-4 sm:px-6", finished && "pb-24")}
           />
-          {!finished && begun && (
+          {!finished && begun && !unreached && (
             <form
               className="shrink-0 px-3 pb-2 pt-1 sm:px-5"
               onSubmit={(e) => {
@@ -398,11 +504,23 @@ export function Workspace({ id }: { id: string }) {
       </div>
 
       {/* Mobile controls */}
-      {!finished && begun && <div className="relative z-10 shrink-0 pb-[env(safe-area-inset-bottom)] lg:hidden">{controls}</div>}
+      {!finished && begun && !unreached && <div className="relative z-10 shrink-0 pb-[env(safe-area-inset-bottom)] lg:hidden">{controls}</div>}
 
       {/* Start / resume / outcome */}
       <AnimatePresence>
-        {view.hydrated && !finished && (!begun || (paused && !takeover && !pending)) && (
+        {unreached && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            className="fixed inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-12"
+          >
+            <Button size="lg" className="h-14 rounded-full px-10 text-lead" onClick={redial} disabled={redialing}>
+              <RotateCcw className="size-4" /> {redialing ? "Calling…" : `Call ${view.conversation?.recipient_name ?? "again"} again`}
+            </Button>
+          </motion.div>
+        )}
+        {view.hydrated && !finished && !unreached && (!begun || (paused && !takeover && !pending)) && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}

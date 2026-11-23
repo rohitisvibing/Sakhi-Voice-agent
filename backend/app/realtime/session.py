@@ -21,14 +21,22 @@ from app.models.conversation import (
     Approval,
     ApprovalDecision,
     ApprovalStatus,
+    CallStatus,
     Conversation,
     ConversationMode,
     ConversationState,
     can_transition,
 )
 from app.models.engine import TurnPlan
-from app.models.mission import DEFAULT_AGENT_NAME, Mission, MissionStatus, agent_name
+from app.models.mission import (
+    DEFAULT_AGENT_NAME,
+    ApprovalKind,
+    Mission,
+    MissionStatus,
+    agent_name,
+)
 from app.models.principal import PrincipalProfile
+from app.models.report import CallSummary
 from app.models.transcript import EventKind, Speaker, TranscriptEvent
 from app.providers.languages import to_code, to_name
 from app.providers.stt.base import STTStream
@@ -42,8 +50,10 @@ from app.services.conversation_manager import (
 )
 from app.services.policy_guard import extract_amounts
 
+from . import dtmf
 from .audio_buffer import AudioBuffer
 from .counterparty import BrowserMicChannel, CounterpartyChannel, SimulatedChannel
+from .phone import PhoneChannel
 
 log = logging.getLogger(__name__)
 S = ConversationState
@@ -104,7 +114,11 @@ class LiveSession:
         self.negotiation = conv.negotiation
         self.state: ConversationState = conv.state
         self.channel: CounterpartyChannel = (
-            SimulatedChannel() if conv.mode == ConversationMode.simulated else BrowserMicChannel())
+            SimulatedChannel() if conv.mode == ConversationMode.simulated
+            else PhoneChannel() if conv.mode == ConversationMode.phone
+            else BrowserMicChannel())
+        self.phone = conv.mode == ConversationMode.phone
+        self.call_capped = False  # the phone call limit, not the plan, is what ran out
         # (event id or None, text). Nudges stay "queued" until a spoken line has used them.
         self.instructions: list[tuple[str | None, str]] = [
             (e.id, e.text) for e in events if e.kind == EventKind.instruction]
@@ -216,6 +230,12 @@ class LiveSession:
         self.conv.talk_seconds = int(self.talk_used())
         await self._persist()
         self.allowance = await billing.remaining_seconds(self.c, self.mission)
+        if self.phone:
+            # One phone call runs inside one server function: wrap up before its time limit.
+            cap = float(self.c.settings.phone_call_limit_seconds) - (
+                self.talk_used() - float(self.conv.talk_seconds or 0))
+            self.call_capped = self.allowance is None or cap < self.allowance
+            self.allowance = cap if self.allowance is None else min(self.allowance, cap)
         self._grace = overrun_grace(self.allowance or 0.0)
         self._talk_base = self.talk_used()
         self.out_of_time = self.allowance is not None and self.allowance <= 0
@@ -257,9 +277,19 @@ class LiveSession:
             await self.set_state(S.listening)
 
     def state_msg(self) -> dict:
-        return {"type": "state", "state": self.state.value, "paused": self.paused,
-                "takeover": self.takeover_active, "muted": self.muted,
-                "voice": self.voice_enabled, "demo": self.c.demo}
+        msg = {"type": "state", "state": self.state.value, "paused": self.paused,
+               "takeover": self.takeover_active, "muted": self.muted,
+               "voice": self.voice_enabled, "demo": self.c.demo}
+        if self.phone:
+            msg["call_status"] = self.conv.call_status.value if self.conv.call_status else None
+        return msg
+
+    async def set_call_status(self, status: CallStatus) -> None:
+        if self.conv.call_status == status:
+            return
+        self.conv.call_status = status
+        await self.emit(self.state_msg())
+        self._bg_task(self._persist())
 
     async def add_event(self, event: TranscriptEvent) -> TranscriptEvent:
         self.events.append(event)
@@ -401,6 +431,14 @@ class LiveSession:
     async def _play(self, event: TranscriptEvent, speaker: Speaker,
                     audio: AudioBuffer | None = None) -> None:
         reading_time = min(6.0, max(1.2, len(event.text) * 0.045)) if self.pace_text else 0
+        if self.channel.handles_audio:
+            try:
+                await self.channel.play(self, event, self._voice_for(speaker, event.language))
+            except AppError as e:
+                await self.error(e)
+                if e.kind == ErrorKind.unsupported_language:
+                    await self.system(f"{e.message} Showing text only for this line.")
+            return
         if not (self.voice_enabled and self.sinks):
             await asyncio.sleep(reading_time if self.sinks else 0)
             return
@@ -461,6 +499,9 @@ class LiveSession:
     # ---- lifecycle -----------------------------------------------------------------------
     async def end_out_of_time(self) -> None:
         """Hang up because talk time ran out. On the free trial, ask them to subscribe now."""
+        if self.call_capped:
+            await self.finish("Reached the phone call time limit.")
+            return
         await self.finish("Talk time used up.")
         if billing.enabled(self.c) and not await billing.active_subscription(
                 self.c, self.mission.principal_id):
@@ -488,15 +529,34 @@ class LiveSession:
         await self.set_state(S.connecting)
         self.schedule(self._open(), kind="agent")
 
+    async def start_phone(self) -> None:
+        """The callee answered and the call's audio is connected."""
+        if self.state in (S.completed, S.failed):
+            return
+        if not await self._has_time():
+            await self.finish("No talk time left for this call.")
+            return
+        await self.set_call_status(CallStatus.in_conversation)
+        self.paused = False
+        await self.set_state(S.connecting)
+        self.schedule(self._open(), kind="agent")
+
     async def _open(self) -> None:
         if self.voice_enabled:
             self.c.tts.warm()
         await self.channel.prepare(self)
         self.mission.status = MissionStatus.active
         self._bg_task(self._save_mission())
-        await self.system("Session started" + (" with a simulated counterparty"
-                                              if self.conv.mode == ConversationMode.simulated
-                                              else ". Listening through your microphone"))
+        if self.phone:
+            await self.system(f"Connected to {self.conv.recipient_name or 'the call'}")
+        else:
+            await self.system("Session started" + (" with a simulated counterparty"
+                                                  if self.conv.mode == ConversationMode.simulated
+                                                  else ". Listening through your microphone"))
+        if self.phone and self._answered_by_menu():
+            # An automated menu picked up: no introduction, let the agent work the menu.
+            await self.run_agent_turn(allow_hold=True)
+            return
         brief = self.mission.brief
         # Openings prepared before AI announcements became optional still say it, and ones
         # prepared before the agent had a name don't give it: re-open live in both cases.
@@ -515,6 +575,10 @@ class LiveSession:
                           "the principal's behalf, then state the purpose.",
                 is_opening=True)
 
+    def _answered_by_menu(self) -> bool:
+        heard = [e.text for e in self.events if e.speaker == Speaker.counterparty]
+        return bool(heard) and dtmf.sounds_like_menu(" ".join(heard))
+
     async def _save_mission(self) -> None:
         with contextlib.suppress(Exception):
             self.mission.updated_at = utcnow()
@@ -529,17 +593,32 @@ class LiveSession:
         self.paused = False
         await self.set_state(S.failed if failed else S.completed)
         self.conv.ended_at = utcnow()
+        if self.phone:
+            self.conv.call_status = CallStatus.failed if failed else CallStatus.completed
+            await self.channel.close(self)
         await self.system(reason)
         await self._persist()
         self.mission.status = MissionStatus.failed if failed else MissionStatus.completed
         await self._save_mission()
         self.report_task = asyncio.create_task(self._generate_report())
 
+    def _call_summary(self) -> CallSummary:
+        connected = next((e.ts for e in self.events if e.speaker == Speaker.system
+                          and e.text.startswith("Connected to")), None)
+        ended = self.conv.ended_at or utcnow()
+        seconds = int((ended - connected).total_seconds()) if connected else 0
+        return CallSummary(recipient_name=self.conv.recipient_name,
+                           recipient_phone=self.conv.recipient_phone,
+                           duration_seconds=max(0, seconds),
+                           ivr_path=list(self.negotiation.ivr_path))
+
     async def _generate_report(self) -> None:
         await self.emit({"type": "report.pending"})
         try:
             report = await outcome_analyzer.analyze(self.llm, self.conv.id, self.spec,
                                                     self.negotiation, self.events)
+            if self.phone:
+                report.call = self._call_summary()
             await self.c.repo.save_report(report)
             await self.emit({"type": "report.ready", "report": report.model_dump(mode="json")})
         except AppError as e:
@@ -561,7 +640,7 @@ class LiveSession:
                           approved_disclosures=dict(self.approved_disclosures),
                           authorised_amounts=set(self.authorised_amounts), directive=directive,
                           is_opening=is_opening, commitment_approved=self.commitment_approved,
-                          allow_hold=allow_hold)
+                          allow_hold=allow_hold, phone=self.phone)
 
     # ---- off the critical path: notes, speculation, translation ---------------------------
     def _start_state_update(self, agent_line: str | None = None,
@@ -732,6 +811,18 @@ class LiveSession:
                     approval.request_en = last_cp.meta.get("en")
             self._bg_task(self._save_approval(approval))
             self._drop_speculation()
+            if approval.kind == ApprovalKind.ivr_choice:
+                # A phone menu: there is nobody to say "one moment" to. Wait for the principal.
+                await self.add_event(TranscriptEvent(
+                    conversation_id=self.conv.id, speaker=Speaker.system,
+                    kind=EventKind.approval,
+                    text=decision.approval.reason or "Which option should Sakhi choose?",
+                    meta={"approval_id": approval.id}))
+                await self.set_state(S.awaiting_approval)
+                await self.emit({"type": "approval.request",
+                                 "approval": approval.model_dump(mode="json")})
+                await self.emit_negotiation()
+                return
             hold_line = approval_manager.holding_line(plan)
             self._start_state_update(hold_line, plan.response_language)
             await self.speak(Speaker.agent, hold_line, plan.response_language,
@@ -751,6 +842,11 @@ class LiveSession:
         await self.speak_agent_plan(plan, nudges)
 
     async def speak_agent_plan(self, plan: TurnPlan, nudges: list[str] | None = None) -> None:
+        if plan.dtmf and self.phone and not plan.response_text.strip():
+            await self._press(plan, nudges)
+            return
+        if self.phone and self.conv.call_status == CallStatus.navigating_ivr:
+            await self.set_call_status(CallStatus.in_conversation)  # a person answered
         for offer in plan.offers_made:
             offer.by, offer.turn = "agent", self.turn_no
             self.negotiation.offers_made.append(offer)
@@ -786,6 +882,27 @@ class LiveSession:
             else:
                 await self.run_agent_turn(directive=NUDGE_DIRECTIVE, allow_hold=True)
             return
+        if self.paused or self.takeover_active:
+            await self.set_state(S.paused)
+            return
+        await self.channel.after_agent_turn(self)
+
+    async def _press(self, plan: TurnPlan, nudges: list[str] | None) -> None:
+        """Press keys in a phone menu, then listen to what it says next."""
+        digits = plan.dtmf or ""
+        label = (plan.dtmf_label or "").strip()
+        await self.set_call_status(CallStatus.navigating_ivr)
+        step = f"{digits}: {label}" if label else digits
+        self.negotiation.ivr_path.append(step)
+        await self.emit_negotiation()
+        await self.add_event(TranscriptEvent(
+            conversation_id=self.conv.id, speaker=Speaker.agent, kind=EventKind.event,
+            text=f"Pressed {digits}" + (f" ({label})" if label else ""),
+            meta={"dtmf": digits}))
+        await self.set_state(S.speaking)
+        await self.channel.press(self, digits)
+        if nudges:
+            await self._nudge_status(nudges, "applied")
         if self.paused or self.takeover_active:
             await self.set_state(S.paused)
             return
@@ -833,7 +950,8 @@ class LiveSession:
                 a.status == ApprovalStatus.pending for a in self.approvals.values()):
             await self.set_state(S.awaiting_approval)
             return
-        await self.run_agent_turn(directive=directive)
+        # On a phone call the other side may be a menu still listing its options: Sakhi may wait.
+        await self.run_agent_turn(directive=directive, allow_hold=self.phone)
 
     async def counterparty_said(self, text: str, language: str | None, source: str,
                                 utterance_id: str | None = None) -> None:
@@ -848,6 +966,9 @@ class LiveSession:
             meta={"utterance_id": utterance_id} if utterance_id else {}))
         if self._needs_english(event):
             self._bg_task(self._translate(event))
+        self.channel.heard_speech(self, final=True)
+        if self.state == S.connecting:
+            return  # their "Hello?" on picking up: the opening answers it
         if self.task_kind == "agent" and self.task and not self.task.done() \
                 and self.state == S.speaking:
             self.respond_after_speech = "reply"  # answer once the current line finishes
@@ -1035,8 +1156,9 @@ class LiveSession:
 
     # ---- microphone / STT (live mode) ------------------------------------------------------
     async def on_audio(self, pcm: bytes) -> None:
-        if (not self.channel.uses_microphone or self.muted
-                or self.state in (S.completed, S.failed, S.ready, S.connecting)):
+        closed = (S.completed, S.failed, S.ready) if self.phone else (
+            S.completed, S.failed, S.ready, S.connecting)
+        if not self.channel.uses_microphone or self.muted or self.state in closed:
             return
         if self.stt is None:
             if time.monotonic() < self.stt_retry_at:
@@ -1057,6 +1179,7 @@ class LiveSession:
             async for ev in stream.events():
                 uid = partial_ids.setdefault(ev.utterance, f"utt-{time.time_ns()}")
                 if ev.type == "partial" and ev.text.strip():
+                    self.channel.heard_speech(self)
                     if self.state == S.speaking and self.task_kind == "agent":
                         await self.interrupt(barge_in=True)
                     await self.emit({"type": "transcript.partial", "utterance_id": uid,

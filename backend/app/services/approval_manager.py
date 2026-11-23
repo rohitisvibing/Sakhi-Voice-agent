@@ -9,7 +9,7 @@ from app.models.mission import ApprovalKind
 
 HOLDING_LINES = {
     "Kannada": "ಒಂದು ನಿಮಿಷ, ನಾನು ಇದನ್ನು ಖಚಿತಪಡಿಸಿಕೊಳ್ಳುತ್ತೇನೆ.",
-    "Hindi": "एक मिनट, मैं इसकी पुष्टि कर लेता हूँ।",
+    "Hindi": "एक मिनट, मैं इसकी पुष्टि कर लेती हूँ।",
     "Tamil": "ஒரு நிமிடம், நான் இதை உறுதி செய்கிறேன்.",
     "Telugu": "ఒక్క నిమిషం, నేను దీన్ని నిర్ధారించుకుంటాను.",
     "English": "One moment please, let me confirm that.",
@@ -44,6 +44,18 @@ def resolve(approval: Approval, decision: ApprovalDecision, plan: TurnPlan | Non
     approval.status = decision.decision
     approval.alternative_text = decision.alternative_text
     approval.resolved_at = utcnow()
+    if approval.kind == ApprovalKind.ivr_choice:
+        if decision.decision == ApprovalStatus.approved:
+            return Resolution(speak_proposed=plan is not None, directive=None if plan else (
+                f"The principal approved: {approval.proposed}. Press that key now (dtmf)."))
+        if decision.decision == ApprovalStatus.rejected:
+            return Resolution(directive=(
+                "The principal doesn't want that menu option. Pick another that fits, or press 0 "
+                "for an operator. Say nothing to the menu."))
+        alt = (decision.alternative_text or "").strip()
+        return Resolution(instruction=alt, directive=(
+            f"In this phone menu the principal says: \"{alt}\". Press the matching key now "
+            "(dtmf) and say nothing."))
     if decision.decision == ApprovalStatus.approved:
         if approval.kind == ApprovalKind.info_disclosure:
             return Resolution(disclose_key=approval.disclosure_key,

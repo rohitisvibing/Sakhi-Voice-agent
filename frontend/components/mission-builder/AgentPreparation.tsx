@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
-import { Bot, ChevronDown, Mic, Pencil, RotateCcw, Volume2, VolumeX } from "lucide-react";
+import { Bot, ChevronDown, Mic, Pencil, Phone, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import { api } from "@/services/api";
-import type { ConversationMode, Mission } from "@/types/api";
+import type { ConversationMode, Mission, Recipient } from "@/types/api";
 import { AgentOrb } from "@/components/orb/AgentOrb";
 import { AmbientGlow } from "@/components/shell/AmbientGlow";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,8 @@ import { IconButton } from "@/components/ui/icon-button";
 import { ErrorNote } from "@/components/shell/ErrorNote";
 import { DealLine, dealFrom } from "@/components/viz/DealLine";
 import { cn } from "@/lib/utils";
+import { RecipientPicker } from "./RecipientPicker";
+import { ConfirmCallSheet } from "./ConfirmCallSheet";
 
 function Plan({ mission }: { mission: Mission }) {
   const b = mission.brief!;
@@ -62,7 +64,8 @@ function Plan({ mission }: { mission: Mission }) {
 
 const MODES: { mode: ConversationMode; label: string; hint: string; icon: typeof Bot }[] = [
   { mode: "simulated", label: "Practice", hint: "An AI plays the other side", icon: Bot },
-  { mode: "live", label: "Live", hint: "The other person speaks into this device", icon: Mic },
+  { mode: "live", label: "In person", hint: "Hold this phone near the other person", icon: Mic },
+  { mode: "phone", label: "Phone call", hint: "Sakhi calls them", icon: Phone },
 ];
 
 export function AgentPreparation({ id }: { id: string }) {
@@ -74,6 +77,9 @@ export function AgentPreparation({ id }: { id: string }) {
   const [voice, setVoice] = useState(true);
   const [plan, setPlan] = useState(false);
   const speechOk = health.data?.speech.configured ?? false;
+  const phoneOk = (health.data?.phone?.configured ?? false) && speechOk;
+  const [recipient, setRecipient] = useState<Recipient | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const started = useRef(false);
 
   const prepare = useMutation({
@@ -84,6 +90,15 @@ export function AgentPreparation({ id }: { id: string }) {
     mutationFn: () => api.createConversation(id, mode, voice && speechOk),
     // Straight into the call: the workspace starts it as soon as it connects.
     onSuccess: (c) => router.push(`/conversations/${c.id}?autostart=1`),
+  });
+  // A phone call: create it, then dial only now that the person has confirmed who to call.
+  const call = useMutation({
+    mutationFn: async () => {
+      const c = await api.createConversation(id, "phone", true, recipient!);
+      await api.dial(c.id);
+      return c;
+    },
+    onSuccess: (c) => router.push(`/conversations/${c.id}`),
   });
 
   const m = mission.data;
@@ -138,7 +153,7 @@ export function AgentPreparation({ id }: { id: string }) {
 
           <div className="mt-10 flex items-center justify-center gap-2">
             <div role="radiogroup" aria-label="Who's on the other end" className="flex rounded-full bg-surface/80 p-1 ring-1 ring-line">
-              {MODES.map(({ mode: v, label, hint, icon: Icon }) => (
+              {MODES.filter((x) => x.mode !== "phone" || phoneOk).map(({ mode: v, label, hint, icon: Icon }) => (
                 <button
                   key={v}
                   type="button"
@@ -147,7 +162,7 @@ export function AgentPreparation({ id }: { id: string }) {
                   title={hint}
                   onClick={() => setMode(v)}
                   className={cn(
-                    "flex min-h-10 items-center gap-2 rounded-full px-4 text-meta text-ink-2 transition-colors hover:text-ink",
+                    "flex min-h-10 items-center gap-2 rounded-full px-3 text-meta text-ink-2 transition-colors hover:text-ink sm:px-4",
                     mode === v && "bg-elevated text-ink",
                   )}
                 >
@@ -155,6 +170,7 @@ export function AgentPreparation({ id }: { id: string }) {
                 </button>
               ))}
             </div>
+            {mode !== "phone" && (
             <IconButton
               label={!speechOk ? "Voice needs a Sarvam key" : voice ? "Voice on" : "Text only"}
               icon={voice && speechOk ? Volume2 : VolumeX}
@@ -162,17 +178,43 @@ export function AgentPreparation({ id }: { id: string }) {
               disabled={!speechOk}
               onClick={() => setVoice((v) => !v)}
             />
+            )}
           </div>
 
-          <ErrorNote error={open.error} className="mx-auto mt-6 max-w-md text-left" />
-          <Button
-            size="lg"
-            onClick={() => open.mutate()}
-            disabled={open.isPending}
-            className="mt-8 h-14 rounded-full px-12 text-lead shadow-[0_10px_50px_-10px_rgb(157_176_255/0.7)]"
-          >
-            Start
-          </Button>
+          {mode === "phone" ? (
+            <>
+              <RecipientPicker suggestedName={m.spec.counterparty.name} onChange={setRecipient} />
+              <Button
+                size="lg"
+                onClick={() => setConfirming(true)}
+                disabled={!recipient}
+                className="mt-8 h-14 rounded-full px-10 text-lead shadow-[0_10px_50px_-10px_rgb(157_176_255/0.7)]"
+              >
+                <Phone className="size-5" aria-hidden /> {recipient ? `Call ${recipient.name}` : "Call"}
+              </Button>
+              <ConfirmCallSheet
+                recipient={recipient}
+                objective={m.spec.objective}
+                open={confirming}
+                calling={call.isPending}
+                error={call.error}
+                onOpenChange={setConfirming}
+                onConfirm={() => call.mutate()}
+              />
+            </>
+          ) : (
+            <>
+              <ErrorNote error={open.error} className="mx-auto mt-6 max-w-md text-left" />
+              <Button
+                size="lg"
+                onClick={() => open.mutate()}
+                disabled={open.isPending}
+                className="mt-8 h-14 rounded-full px-12 text-lead shadow-[0_10px_50px_-10px_rgb(157_176_255/0.7)]"
+              >
+                Start
+              </Button>
+            </>
+          )}
 
           <div className="mt-10 flex items-center justify-center gap-1">
             <button

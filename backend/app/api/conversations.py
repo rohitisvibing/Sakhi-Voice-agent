@@ -6,7 +6,14 @@ from app.core.auth import check_daily_limit
 from app.core.deps import get_container
 from app.core.errors import AppError, ErrorKind
 from app.models.common import Schema
-from app.models.conversation import Approval, Conversation, ConversationState, CreateConversation
+from app.models.conversation import (
+    Approval,
+    CallStatus,
+    Conversation,
+    ConversationMode,
+    ConversationState,
+    CreateConversation,
+)
 from app.models.mission import Mission, MissionStatus
 from app.models.report import OutcomeReport
 from app.models.transcript import TranscriptEvent
@@ -29,10 +36,21 @@ async def create(body: CreateConversation, pid: Principal) -> Conversation:
     m = await owned_mission(c, body.mission_id, pid)
     if m.status not in (MissionStatus.prepared, MissionStatus.active, MissionStatus.completed):
         raise AppError(ErrorKind.invalid_state, "Prepare the agent before starting.")
+    phone = body.mode == ConversationMode.phone
+    if phone:
+        if not (c.settings.phone_available and c.telephony is not None):
+            raise AppError(ErrorKind.missing_key, "Phone calls aren't set up on this server yet.")
+        if not c.voice_available:
+            raise AppError(ErrorKind.missing_key, "Phone calls need speech (a Sarvam key).")
+        if body.recipient is None:
+            raise AppError(ErrorKind.invalid_state, "Choose who Sakhi should call.")
     await check_daily_limit(c, pid, "conversations")
     await billing.check_can_start_call(c, m)
     conv = Conversation(mission_id=m.id, mode=body.mode, state=ConversationState.ready,
-                        voice_enabled=body.voice_enabled and c.voice_available)
+                        voice_enabled=phone or (body.voice_enabled and c.voice_available))
+    if phone and body.recipient:
+        conv.recipient_name, conv.recipient_phone = body.recipient.name, body.recipient.phone
+        conv.call_status = CallStatus.preparing
     return await c.repo.save_conversation(conv)
 
 

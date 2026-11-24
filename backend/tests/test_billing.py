@@ -321,3 +321,30 @@ async def test_trial_running_out_ends_the_call_and_asks_to_subscribe(make_sessio
 
 async def _always_true():
     return True
+
+
+def test_free_accounts_never_pay_or_run_out(client, container, monkeypatch):
+    from app.core import auth
+
+    pid = container.settings.default_principal_id
+    container.settings.free_accounts = "Owner@Example.com, other@example.com"
+    monkeypatch.setitem(auth._verified_emails, pid, "owner@example.com")
+    assert client.get("/api/billing").json() == client.get("/api/billing").json() | {
+        "enabled": False, "status": "free"}
+    first = _mission(client).json()
+    for _ in range(3):  # no trial: every mission is allowed
+        assert _mission(client).status_code == 200
+    _ready(client, first["id"])
+    conv = client.post("/api/conversations", json={"mission_id": first["id"]}).json()
+    container.repo.conversations[conv["id"]].talk_seconds = 10_000  # far past any cap
+    assert client.post("/api/conversations", json={"mission_id": first["id"]}).status_code == 200
+
+
+def test_a_profile_email_does_not_make_an_account_free(client, container, monkeypatch):
+    from app.core import auth
+
+    pid = container.settings.default_principal_id
+    container.settings.free_accounts = "owner@example.com"
+    monkeypatch.setitem(auth._verified_emails, pid, "someone@else.com")
+    _mission(client)
+    assert _mission(client).status_code == 402  # trial used, still has to subscribe

@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     razorpay_key_secret: str = ""
     razorpay_webhook_secret: str = ""
     razorpay_plan_id: str = ""
+    # Comma-separated sign-in emails that never pay (checked against the verified sign-in
+    # email, not the editable profile).
+    free_accounts: str = ""
     plan_price_inr: int = 499
     monthly_talk_minutes: int = 180  # never shown in the UI
     trial_talk_minutes: int = 3      # the free mission's hidden cap, across its calls
@@ -95,6 +98,10 @@ class Settings(BaseSettings):
     @property
     def speech_configured(self) -> bool:
         return bool(self.sarvam_api_key)
+
+    @property
+    def free_emails(self) -> set[str]:
+        return {e.strip().lower() for e in self.free_accounts.split(",") if e.strip()}
 
     @property
     def billing_configured(self) -> bool:

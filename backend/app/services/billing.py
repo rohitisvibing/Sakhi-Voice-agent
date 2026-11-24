@@ -20,6 +20,19 @@ def enabled(c: Container) -> bool:
     return c.settings.billing_configured
 
 
+async def is_free(c: Container, pid: str) -> bool:
+    """Accounts listed in FREE_ACCOUNTS never pay and have no talk-time cap."""
+    if not c.settings.free_emails:
+        return False
+    from app.core.auth import verified_email  # auth imports this module
+
+    return (await verified_email(c, pid) or "") in c.settings.free_emails
+
+
+async def _billed(c: Container, pid: str) -> bool:
+    return enabled(c) and not await is_free(c, pid)
+
+
 def needs_subscription(message: str = "Subscribe to keep Sakhi working for you.") -> AppError:
     return AppError(ErrorKind.payment_required, message, detail={"reason": "subscribe"})
 
@@ -38,7 +51,7 @@ async def active_subscription(c: Container, pid: str) -> Subscription | None:
 
 async def can_create_mission(c: Container, pid: str) -> bool:
     """Raises unless allowed. Returns True when this mission becomes the free trial."""
-    if not enabled(c) or await active_subscription(c, pid):
+    if not await _billed(c, pid) or await active_subscription(c, pid):
         return False
     if await c.repo.get_trial_mission(pid) is None:
         return True
@@ -47,9 +60,9 @@ async def can_create_mission(c: Container, pid: str) -> bool:
 
 async def remaining_seconds(c: Container, mission: Mission) -> float | None:
     """Talk time this mission's calls may still use; None = unmetered (billing off)."""
-    if not enabled(c):
-        return None
     pid = mission.principal_id
+    if not await _billed(c, pid):
+        return None
     sub = await active_subscription(c, pid)
     if sub:
         used = await c.repo.talk_seconds(pid, since=sub.current_start)
@@ -77,6 +90,8 @@ async def status(c: Container, pid: str) -> dict:
            "cancel_at_period_end": False}
     if not enabled(c):
         return out | {"status": "free"}
+    if await is_free(c, pid):
+        return out | {"enabled": False, "status": "free"}  # no plan, trial or paywall to show
     sub = await active_subscription(c, pid)
     if sub:
         used = await c.repo.talk_seconds(pid, since=sub.current_start)

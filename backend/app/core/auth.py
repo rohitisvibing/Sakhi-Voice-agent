@@ -140,7 +140,32 @@ async def authenticate(c: Container, token: str | None) -> str:
         raise unauthorized()
     user = await get_verifier(c.settings).verify(token)
     await ensure_principal(c, user)
+    if user.email:
+        _verified_emails[user.id] = user.email.lower()
     return user.id
+
+
+_verified_emails: dict[str, str] = {}
+
+
+async def verified_email(c: Container, principal_id: str) -> str | None:
+    """The sign-in email Supabase verified for this account (never the editable profile)."""
+    if principal_id in _verified_emails:
+        return _verified_emails[principal_id]
+    s = c.settings
+    if not (s.supabase_url and s.supabase_service_role_key):
+        return None
+    key = s.supabase_service_role_key
+    try:
+        async with httpx.AsyncClient(timeout=10) as http:
+            r = await http.get(f"{s.supabase_url.rstrip('/')}/auth/v1/admin/users/{principal_id}",
+                               headers={"apikey": key, "Authorization": f"Bearer {key}"})
+    except httpx.HTTPError:
+        return None
+    email = (r.json().get("email") or "").lower() if r.status_code == 200 else ""
+    if email:
+        _verified_emails[principal_id] = email
+    return email or None
 
 
 def bearer(request: Request) -> str | None:
